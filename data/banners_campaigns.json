@@ -1,0 +1,22 @@
+[
+  {
+    "id": "ad-comercio-1",
+    "client_name": "Comercio Saladillense",
+    "image_url": "https://saladillovivo.vercel.app/default-og-image.png",
+    "target_url": "https://saladillovivo.com.ar",
+    "position": "carousel",
+    "is_active": true,
+    "impressions": 0,
+    "expiration_date": "2026-12-31"
+  },
+  {
+    "id": "ad-institucional-sv",
+    "client_name": "Saladillo Vivo Streaming",
+    "image_url": "https://saladillovivo.vercel.app/default-og-image.png",
+    "target_url": "https://saladillovivo.com.ar",
+    "position": "sidebar",
+    "is_active": true,
+    "impressions": 0,
+    "expiration_date": "2026-12-31"
+  }
+]

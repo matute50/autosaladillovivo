@@ -56,3 +56,4 @@ next-env.d.ts
 
 data/audios/
 data/slides/
+data/weather_cache.json
