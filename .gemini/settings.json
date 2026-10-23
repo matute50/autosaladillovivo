@@ -9,7 +9,7 @@
         "--read-only"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_5aa3825083b90b3046314b21c950463c08373ab3"
+        "SUPABASE_ACCESS_TOKEN": ""
       }
     }
   }

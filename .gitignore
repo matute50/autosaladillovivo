@@ -50,3 +50,6 @@ logs/
 next-env.d.ts
 
 .vercel
+
+# gemini
+.gemini/
