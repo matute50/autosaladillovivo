@@ -1,0 +1,5 @@
+# Dependencias para el sistema de automatización multi-agente de Saladillo Vivo
+requests>=2.31.0
+gTTS>=2.5.1
+pydub>=0.25.1
+audioop-lts>=0.2.2; python_version >= '3.13'

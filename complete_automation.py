@@ -44,6 +44,7 @@ from agents.orchestrator_agent import OrchestratorAgent
 from agents.scraper_agent import ScraperAgent
 from agents.storage_agent import StorageAgent
 from agents.ai_rewriter_agent import AiRewriterAgent
+from agents.audio_generator_agent import AudioGeneratorAgent
 from agents.publisher_agent import PublisherAgent
 
 # Directorios de trabajo
@@ -74,15 +75,17 @@ if not logger.handlers:
 
 class NewsAutomationSystem:
     """
-    Controlador maestro del pipeline de 5 pasos para Saladillo Vivo.
+    Controlador maestro del pipeline de 6 pasos para Saladillo Vivo.
     """
-    def __init__(self, limit_per_source=10, run_immediately=True, immediate_publish=True):
+    def __init__(self, limit_per_source=10, run_immediately=True, immediate_publish=True, enable_audio=True):
         self.limit_per_source = limit_per_source
         self.run_immediately = run_immediately
         self.immediate_publish = immediate_publish
+        self.enable_audio = enable_audio
         self.orchestrator = OrchestratorAgent(
             limit_per_source=limit_per_source,
-            immediate_publish=immediate_publish
+            immediate_publish=immediate_publish,
+            enable_audio=enable_audio
         )
         self.running = False
         self.thread = None
@@ -144,23 +147,26 @@ class NewsAutomationSystem:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Sistema de Automatización Completo de Noticias para Saladillo Vivo")
-    parser.add_argument('--single-run', '--once', action='store_true', dest='single_run', help='Ejecutar un solo ciclo completo de 5 pasos y salir')
+    parser.add_argument('--single-run', '--once', action='store_true', dest='single_run', help='Ejecutar un solo ciclo completo de 6 pasos y salir')
     parser.add_argument('--limit', type=int, default=10, help='Límite de artículos por portal (default: 10)')
     parser.add_argument('--no-immediate', action='store_true', help='Publicar en estado no inmediato (para delegar al cron de Make.com)')
+    parser.add_argument('--no-audio', action='store_true', help='Desactivar generación automática de audio')
 
     args = parser.parse_args()
 
     print("=================================================================")
-    print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS LOCALES")
+    print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS Y AUDIO")
     print(f" Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f" Modo: {'Ejecución Única (--once)' if args.single_run else 'Servicio Continuo Automático'}")
+    print(f" Generación de audio: {'Desactivada (--no-audio)' if args.no_audio else 'Activada (gTTS + Pydub + Supabase Storage)'}")
     print(f" Archivo de Log: {LOG_FILE}")
     print("=================================================================")
 
     automation = NewsAutomationSystem(
         limit_per_source=args.limit,
         run_immediately=True,
-        immediate_publish=not args.no_immediate
+        immediate_publish=not args.no_immediate,
+        enable_audio=not args.no_audio
     )
 
     if args.single_run:

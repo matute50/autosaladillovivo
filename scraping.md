@@ -167,18 +167,19 @@ Las noticias pueden ser emitidas como piezas televisivas animadas:
 
 ---
 
-## 6. Sistema de Automatización de Noticias Multi-Agente (Arquitectura de 5 Pasos)
+## 6. Sistema de Automatización de Noticias Multi-Agente (Arquitectura de 6 Pasos)
 
-La plataforma dispone de un motor autónomo desarrollado en Python (`agents/` y scripts raíz) que ejecuta de forma desacoplada y secuencial el ciclo completo de noticias:
+La plataforma dispone de un motor autónomo desarrollado en Python (`agents/` y scripts raíz) que ejecuta de forma desacoplada y secuencial el ciclo completo de noticias y locución:
 
 ```mermaid
 flowchart TD
     A["Paso 1: ScraperAgent<br/>(ABC, Ahora, InfoSaladillo)"] -->|Artículos Crudos| B["Paso 2: StorageAgent<br/>(Guardar Borrador en BD)"]
     B -->|ID asignado en Supabase| C["Paso 3: AiRewriterAgent<br/>(Reescritura IA Free-First)"]
-    C -->|Títulos y Textos Optimizados| D["Paso 4: StorageAgent<br/>(Actualizar BD con IA)"]
-    D -->|Registro Enriquecido| E["Paso 5: PublisherAgent<br/>(Publicación Oficial is_published=True)"]
-    E --> F["🌐 Portada Saladillo Vivo<br/>(Next.js 15)"]
-    E --> G["📱 Make.com Webhook<br/>(Instagram 4:5 / Facebook 1.91:1)"]
+    C -->|Textos Optimizados| D["Paso 4: AudioGeneratorAgent<br/>(TTS gTTS + Pydub + Storage)"]
+    D -->|audio_url generada| E["Paso 5: StorageAgent<br/>(Actualizar BD con IA y Audio)"]
+    E -->|Registro Enriquecido| F["Paso 6: PublisherAgent<br/>(Publicación Oficial is_published=True)"]
+    F --> G["🌐 Portada Saladillo Vivo<br/>(Next.js 15 + Audio Player)"]
+    F --> H["📱 Make.com Webhook<br/>(Instagram 4:5 / Facebook 1.91:1)"]
 ```
 
 ### 6.1. Agente 1: `ScraperAgent` (`agents/scraper_agent.py`)
@@ -230,19 +231,34 @@ flowchart TD
   - Extensión mayor a 400 caracteres: +1 punto.
   - **Clasificación**: `score >= 5` → `'featured'`, `score >= 3` → `'secondary'`, `score < 3` → `'tertiary'`.
 
-### 6.4. Agente 4: Actualización en Base de Datos con IA (`StorageAgent.update_with_ai`)
+### 6.4. Agente 4: Generación y Optimización de Audio (`AudioGeneratorAgent`)
+- **Ubicación**: `agents/audio_generator_agent.py`
+- **Motor de Síntesis**: `gTTS` con modulación para acento argentino (`lang='es', tld='com.ar'`) y fallback a español estándar.
+- **Optimización Acústica**:
+  - Conversión a flujo de audio con `pydub.AudioSegment`.
+  - Normalización de volumen (`audio.normalize()`).
+  - Filtrado pasa-bajos suave contra siseos y ruidos de compresión.
+  - Exportación en formato MP3 optimizado a 128 kbps (equilibrio perfecto entre nitidez de voz y ligereza de transferencia).
+- **Supabase Storage**:
+  - Creación y verificación automática del bucket público `'audios'`.
+  - Subida directa con `x-upsert: true` vía REST API.
+  - Generación de URL pública accesible universalmente:
+    `https://otwvfihzaznyjvjtkvvd.supabase.co/storage/v1/object/public/audios/article_{id}_{hash}.mp3`
+
+### 6.5. Agente 5: Actualización en Base de Datos con IA y Audio (`StorageAgent.update_with_ai_and_audio`)
 - Ejecuta un `PATCH` sobre la API REST de Supabase filtrando por `id=eq.{article_id}`.
 - Actualiza:
   - `title`: Título optimizado por IA.
   - `text`: Cuerpo reestructurado profesionalmente.
   - `description`: Copete editorial.
+  - `audio_url`: URL pública del MP3 en Supabase Storage.
   - `meta_title`, `meta_description`: Metadatos SEO.
   - `meta_keywords`: Etiquetas en formato texto.
   - `featureStatus`: Prioridad calculada.
   - `status`: `'ai_processed'`.
   - `updatedAt`: Timestamp ISO actual.
 
-### 6.5. Agente 5: Publicación Oficial y Distribución (`PublisherAgent`)
+### 6.6. Agente 6: Publicación Oficial y Distribución (`PublisherAgent`)
 - Activa la visibilidad pública de la noticia:
   - `is_published`: `true`
   - `status`: `'published'`
@@ -251,9 +267,11 @@ flowchart TD
   - `miniatura_url` y `og_image_url`: Sincronizadas para previsualizaciones sociales.
 - Con esta actualización:
   - Next.js 15 (`getArticlesForHome` con ISR 60s) indexa y renderiza la noticia de inmediato en la portada.
+  - La tarjeta `NewsCard` detecta la presencia de `audio_url` + imagen y permite transmitirla directamente al reproductor de video con `playTemporaryVideo`.
+  - La página individual `/noticia/[slug]` despliega el reproductor de audio interactivo (`NoticiaClient.tsx`) con barra de progreso, control de pausa/reanudación y scrubbing.
   - Los feeds RSS (`/rss.xml` y `/feed/miniaturas`) incorporan la noticia para los lectores y plataformas de agregación.
 
-### 6.6. Orquestador y Planificación Horaria (`OrchestratorAgent`)
+### 6.7. Orquestador y Planificación Horaria (`OrchestratorAgent`)
 El orquestador (`complete_automation.py`) administra la frecuencia de ejecución según la franja horaria local de Argentina:
 
 | Franja Horaria | Intervalo de Ejecución | Justificación Editorial |

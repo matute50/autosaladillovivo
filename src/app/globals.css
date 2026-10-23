@@ -475,3 +475,106 @@
 .ytp-volume-slider-handle {
   display: none !important;
 }
+
+
+/* ==============================================================================
+   REPRODUCTOR DE AUDIO DE NOTICIAS (AUDIO PLAYER)
+   ============================================================================== */
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: rgba(248, 249, 250, 0.95);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 12px;
+  margin: 20px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  transition: all 0.25s ease;
+}
+
+.dark .audio-player {
+  background: rgba(24, 27, 32, 0.95);
+  border-color: rgba(45, 55, 72, 0.8);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.play-button {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.play-button:hover {
+  transform: scale(1.06);
+  background: linear-gradient(135deg, #0369a1 0%, #075985 100%);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.5);
+}
+
+.play-button:active {
+  transform: scale(0.96);
+}
+
+.progress-bar-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+}
+
+.dark .progress-bar {
+  background: #334155;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0ea5e9, #0284c7);
+  border-radius: 4px;
+  transition: width 0.1s linear;
+}
+
+.audio-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dark .audio-info {
+  color: #94a3b8;
+}
+
+.audio-time {
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  justify-content: space-between;
+}
+
+.dark .audio-time {
+  color: #94a3b8;
+}

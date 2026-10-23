@@ -2,12 +2,13 @@
 """
 agents/orchestrator_agent.py — Agente Maestro de Orquestación Periodística
 ========================================================================
-Coordina de forma autónoma el ciclo de 5 pasos requerido para Saladillo Vivo:
+Coordina de forma autónoma el ciclo completo de 6 pasos requerido para Saladillo Vivo:
   1. Scraping de noticias locales (ScraperAgent)
   2. Guardado en base de datos como borrador/raw (StorageAgent)
   3. Modificación de título y texto con IA (AiRewriterAgent)
-  4. Otra vez guardado en base de datos con los datos de IA (StorageAgent)
-  5. Publicación oficial final (PublisherAgent)
+  4. Generación y optimización de audio locutado (AudioGeneratorAgent)
+  5. Actualización en base de datos con IA y audio_url (StorageAgent)
+  6. Publicación oficial final en vivo (PublisherAgent)
 
 Características:
 - Programación dinámica por franjas horarias (30 min / 1 hora / 3 horas).
@@ -27,6 +28,7 @@ from datetime import datetime, timedelta
 from .scraper_agent import ScraperAgent
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
+from .audio_generator_agent import AudioGeneratorAgent
 from .publisher_agent import PublisherAgent
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,11 +53,12 @@ if not logger.handlers:
 
 class OrchestratorAgent:
     """
-    Orquestador multi-agente del ciclo de noticias.
+    Orquestador multi-agente del ciclo de noticias y streaming de audio.
     """
-    def __init__(self, limit_per_source=10, immediate_publish=True):
+    def __init__(self, limit_per_source=10, immediate_publish=True, enable_audio=True):
         self.limit_per_source = limit_per_source
         self.immediate_publish = immediate_publish
+        self.enable_audio = enable_audio
         self.running = False
         self.thread = None
         self.last_execution = None
@@ -66,6 +69,7 @@ class OrchestratorAgent:
         self.scraper_agent = ScraperAgent()
         self.storage_agent = StorageAgent()
         self.rewriter_agent = AiRewriterAgent()
+        self.audio_agent = AudioGeneratorAgent()
         self.publisher_agent = PublisherAgent(self.storage_agent)
 
     def get_next_execution_time(self, current_dt=None):
@@ -96,16 +100,17 @@ class OrchestratorAgent:
 
     def run_full_pipeline(self):
         """
-        Ejecuta el ciclo de 5 pasos:
-        1. Scraping
-        2. Guardar en Base de Datos (Borrador)
-        3. Modificar Título y Texto con IA
-        4. Guardar en Base de Datos (Actualización IA)
-        5. Publicar en Base de Datos
+        Ejecuta el ciclo integral de 6 pasos:
+        1. Scraping (ScraperAgent)
+        2. Guardar en Base de Datos como Borrador (StorageAgent)
+        3. Modificar Título y Texto con IA (AiRewriterAgent)
+        4. Generar y optimizar audio locutado (AudioGeneratorAgent)
+        5. Guardar en Base de Datos con IA y Audio (StorageAgent)
+        6. Publicar Oficialmente en Base de Datos (PublisherAgent)
         """
         start_time = datetime.now()
         logger.info("=================================================================")
-        logger.info("🚀 INICIANDO CICLO MULTI-AGENTE DE NOTICIAS — SALADILLO VIVO")
+        logger.info("🚀 INICIANDO CICLO MULTI-AGENTE DE NOTICIAS Y AUDIO — SALADILLO VIVO")
         logger.info(f"   Hora de inicio: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=================================================================")
 
@@ -130,14 +135,14 @@ class OrchestratorAgent:
         # ----------------------------------------------------------------------
         # PASO 1: SCRAPING
         # ----------------------------------------------------------------------
-        logger.info("📰 [PASO 1/5] ScraperAgent: Extrayendo noticias locales...")
+        logger.info("📰 [PASO 1/6] ScraperAgent: Extrayendo noticias locales...")
         scraped_articles = self.scraper_agent.scrape_all(
             limit_per_source=self.limit_per_source,
             existing_hashes=existing_hashes
         )
 
         if not scraped_articles:
-            logger.info("ℹ️ No se detectaron noticias nuevas en esta iteración.")
+            logger.info("ℹ️ No se detectaron noticias nuevas en las portadas.")
             # Verificar si hay borradores previos pendientes de procesar
             pending_db = self.storage_agent.find_pending_ai_articles(limit=5)
             if not pending_db:
@@ -146,7 +151,7 @@ class OrchestratorAgent:
             logger.info(f"🔁 Se encontraron {len(pending_db)} artículos en borrador para continuar el flujo.")
             articles_to_process = pending_db
         else:
-            logger.info(f"✅ [PASO 1/5] Scraping finalizado: {len(scraped_articles)} artículos nuevos extraídos.")
+            logger.info(f"✅ [PASO 1/6] Scraping finalizado: {len(scraped_articles)} artículos nuevos extraídos.")
             # Guardar backup local
             all_scraped = scraped_articles
             if os.path.exists(history_path):
@@ -161,7 +166,7 @@ class OrchestratorAgent:
             # ------------------------------------------------------------------
             # PASO 2: GUARDAR EN BASE DE DATOS (BORRADOR)
             # ------------------------------------------------------------------
-            logger.info("💾 [PASO 2/5] StorageAgent: Guardando en Supabase como borrador preliminar...")
+            logger.info("💾 [PASO 2/6] StorageAgent: Guardando en Supabase como borrador preliminar...")
             articles_to_process = []
             for art in scraped_articles:
                 draft_record = self.storage_agent.save_draft(art)
@@ -170,7 +175,7 @@ class OrchestratorAgent:
                     articles_to_process.append(art)
                 time.sleep(0.5)
 
-            logger.info(f"✅ [PASO 2/5] Guardados en Supabase: {len(articles_to_process)} borradores con ID asignado.")
+            logger.info(f"✅ [PASO 2/6] Guardados en Supabase: {len(articles_to_process)} borradores con ID asignado.")
 
         if not articles_to_process:
             logger.warning("⚠️ No se pudieron registrar artículos en la base de datos.")
@@ -179,7 +184,7 @@ class OrchestratorAgent:
         # ----------------------------------------------------------------------
         # PASO 3: MODIFICAR TÍTULO Y TEXTO CON IA
         # ----------------------------------------------------------------------
-        logger.info("🤖 [PASO 3/5] AiRewriterAgent: Reestructurando con IA Free-First (GLM/Gemini/OpenAI/Fallback)...")
+        logger.info("🤖 [PASO 3/6] AiRewriterAgent: Reestructurando con IA Free-First (GLM/Gemini/OpenAI/Fallback)...")
         modified_list = []
         for art in articles_to_process:
             ai_data = self.rewriter_agent.rewrite_article(art)
@@ -191,26 +196,56 @@ class OrchestratorAgent:
         with open(os.path.join(DATA_DIR, 'modified_articles.json'), 'w', encoding='utf-8') as f:
             json.dump(modified_list, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"✅ [PASO 3/5] Modificación con IA completada: {len(modified_list)} artículos listos.")
+        logger.info(f"✅ [PASO 3/6] Modificación con IA completada: {len(modified_list)} artículos listos.")
 
         # ----------------------------------------------------------------------
-        # PASO 4: OTRA VEZ GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA)
+        # PASO 4: GENERACIÓN Y OPTIMIZACIÓN DE AUDIO
         # ----------------------------------------------------------------------
-        logger.info("🔄 [PASO 4/5] StorageAgent: Actualizando registros en Supabase con contenido de IA...")
+        audios_generated = 0
+        if self.enable_audio:
+            logger.info("🎙️ [PASO 4/6] AudioGeneratorAgent: Generando locución en audio y subiendo a Storage...")
+            for art in modified_list:
+                art_id = art.get('id')
+                title = art.get('titulo_ia') or art.get('title')
+                text = art.get('contenido_ia') or art.get('text')
+                desc = art.get('meta_description') or art.get('description') or ''
+
+                audio_url = self.audio_agent.process_article_audio(
+                    article_id=art_id,
+                    title=title,
+                    text=text,
+                    description=desc
+                )
+                if audio_url:
+                    art['audio_url'] = audio_url
+                    audios_generated += 1
+                time.sleep(1.2)
+            logger.info(f"✅ [PASO 4/6] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
+        else:
+            logger.info("ℹ️ [PASO 4/6] Generación de audio omitida por configuración.")
+
+        # ----------------------------------------------------------------------
+        # PASO 5: OTRA VEZ GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA Y AUDIO)
+        # ----------------------------------------------------------------------
+        logger.info("🔄 [PASO 5/6] StorageAgent: Actualizando registros en Supabase con datos de IA y audio...")
         updated_count = 0
         for art in modified_list:
             art_id = art.get('id')
-            upd = self.storage_agent.update_with_ai(art_id, art)
+            upd = self.storage_agent.update_with_ai_and_audio(
+                article_id=art_id,
+                ai_data=art,
+                audio_url=art.get('audio_url')
+            )
             if upd:
                 updated_count += 1
             time.sleep(0.5)
 
-        logger.info(f"✅ [PASO 4/5] Base de datos actualizada: {updated_count}/{len(modified_list)} artículos con datos de IA.")
+        logger.info(f"✅ [PASO 5/6] Base de datos actualizada: {updated_count}/{len(modified_list)} artículos.")
 
         # ----------------------------------------------------------------------
-        # PASO 5: FINALMENTE PUBLICAR
+        # PASO 6: FINALMENTE PUBLICAR
         # ----------------------------------------------------------------------
-        logger.info("📢 [PASO 5/5] PublisherAgent: Publicando oficialmente...")
+        logger.info("📢 [PASO 6/6] PublisherAgent: Publicando oficialmente...")
         published_count = 0
         for art in modified_list:
             art_id = art.get('id')
@@ -220,7 +255,7 @@ class OrchestratorAgent:
                 published_count += 1
             time.sleep(0.5)
 
-        logger.info(f"✅ [PASO 5/5] Publicación completada: {published_count}/{len(modified_list)} noticias en vivo.")
+        logger.info(f"✅ [PASO 6/6] Publicación completada: {published_count}/{len(modified_list)} noticias en vivo.")
 
         # Generar reporte de ciclo
         duration = datetime.now() - start_time
@@ -232,7 +267,8 @@ class OrchestratorAgent:
             'scraped_count': len(scraped_articles),
             'drafts_saved_to_db': len(articles_to_process),
             'ai_modified_count': len(modified_list),
-            'db_updated_with_ai': updated_count,
+            'audios_generated_count': audios_generated,
+            'db_updated_with_ai_and_audio': updated_count,
             'published_count': published_count,
             'success_rate': (published_count / len(modified_list) * 100) if modified_list else 100.0,
             'timestamp': datetime.now().isoformat()

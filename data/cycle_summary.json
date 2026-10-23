@@ -1,13 +1,14 @@
 {
   "execution_id": 1,
-  "start_time": "2026-10-23T10:15:11.779112",
-  "end_time": "2026-10-23T10:15:43.432740",
-  "duration_seconds": 31.653609,
+  "start_time": "2026-10-23T13:34:50.099686",
+  "end_time": "2026-10-23T13:36:50.884329",
+  "duration_seconds": 120.78462,
   "scraped_count": 3,
   "drafts_saved_to_db": 3,
   "ai_modified_count": 3,
-  "db_updated_with_ai": 3,
+  "audios_generated_count": 3,
+  "db_updated_with_ai_and_audio": 3,
   "published_count": 3,
   "success_rate": 100.0,
-  "timestamp": "2026-10-23T10:15:43.432745"
+  "timestamp": "2026-10-23T13:36:50.884335"
 }
