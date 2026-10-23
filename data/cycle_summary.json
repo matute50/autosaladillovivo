@@ -1,13 +1,13 @@
 {
   "execution_id": 1,
-  "status": "completed",
-  "start_time": "2026-10-22T22:27:17.069966",
-  "end_time": "2026-10-22T22:28:03.258254",
-  "duration_seconds": 46.19,
-  "scraping_count": 12,
-  "ia_modified_count": 12,
-  "published_count": 12,
-  "failed_count": 0,
-  "success_rate_percent": 100.0,
-  "timestamp": "2026-10-22T22:28:03.258285"
+  "start_time": "2026-10-23T10:15:11.779112",
+  "end_time": "2026-10-23T10:15:43.432740",
+  "duration_seconds": 31.653609,
+  "scraped_count": 3,
+  "drafts_saved_to_db": 3,
+  "ai_modified_count": 3,
+  "db_updated_with_ai": 3,
+  "published_count": 3,
+  "success_rate": 100.0,
+  "timestamp": "2026-10-23T10:15:43.432745"
 }
