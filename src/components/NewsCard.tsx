@@ -56,7 +56,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   const duration = newsItem.animation_duration || 15;
 
   const hasSlide = !!urlSlide;
-  const isHtmlSlide = hasSlide && urlSlide.endsWith('.html');
+  const isHtmlSlide = hasSlide && (urlSlide.includes('.html') || urlSlide.includes('/slides/'));
   const hasAudioImage = !!finalImageUrl && !!audioUrl;
   const isPlayable = hasSlide || hasAudioImage;
 
@@ -93,10 +93,20 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
             playSlide({
                 url: urlSlide,
                 type: 'html',
-                duration: duration,
-                audioUrl: finalAudioUrl, // Ya es null si no hay nada
-                title: title
+                duration: Math.max(duration || 35, 35),
+                audioUrl: finalAudioUrl,
+                title: title,
+                embedsAudio: true
             });
+
+            if (typeof window !== 'undefined') {
+                const playerEl = document.querySelector('.video-universe') || document.querySelector('[data-player-container]');
+                if (playerEl) {
+                    playerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
         }
         return;
     }
@@ -133,6 +143,14 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
 
     if (mediaData) {
         playTemporaryVideo(mediaData, undefined, setVolume);
+        if (typeof window !== 'undefined') {
+            const playerEl = document.querySelector('.video-universe') || document.querySelector('[data-player-container]');
+            if (playerEl) {
+                playerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
     }
   };
 

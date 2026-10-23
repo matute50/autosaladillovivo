@@ -62,19 +62,20 @@ export const useNewsPlayerStore = create<NewsPlayerState>()(
                             type: 'html',
                             embedsAudio: true
                         },
-                        isSlideOpen: true,
+                        isSlideOpen: false,
                         isPlaying: true,
                         isNewsIntroActive: true
                     });
                 } else {
                     const normalizedSlide: SlideData = {
                         ...slide,
+                        type: slide.type || 'html',
                         audioUrl: slide.audioUrl === undefined ? null : slide.audioUrl,
-                        embedsAudio: slide.embedsAudio ?? (slide.type === 'html')
+                        embedsAudio: slide.embedsAudio ?? true
                     };
                     set({
                         currentSlide: normalizedSlide,
-                        isSlideOpen: true,
+                        isSlideOpen: false,
                         isPlaying: true,
                         isNewsIntroActive: true
                     });

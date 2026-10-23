@@ -43,7 +43,10 @@ const VideoSection: React.FC = () => {
   const { volume, setVolume, isMuted, unmute } = useVolumeStore(); // Added unmute
 
   // Auto-Unmute for News or HTML Slides
-  const isHtmlSlideActive = isSlidePlaying && currentSlide && currentSlide.type === 'html';
+  const isHtmlSlideActive = !!(isSlidePlaying && currentSlide && (
+    (typeof currentSlide === 'object' && (currentSlide.type === 'html' || currentSlide.url?.includes('.html') || currentSlide.url?.includes('/slides/'))) ||
+    (typeof currentSlide === 'string' && (currentSlide.includes('.html') || currentSlide.includes('/slides/')))
+  ));
   const isLocalIntro = currentVideo?.url && (
     currentVideo.url.startsWith('/') ||
     currentVideo.url.includes('videos_intro')
@@ -125,7 +128,7 @@ const VideoSection: React.FC = () => {
       pauseForSlide();
       hasStartedAudioRef.current = false; 
 
-      const duration = (currentSlide.duration || 15) * 1000;
+      const duration = (typeof currentSlide === 'object' && currentSlide?.duration ? Math.max(currentSlide.duration, 35) : 35) * 1000;
       const fadeOutDuration = 1000; // 1 segundo de fade out
       
       // Timer para el fade out
@@ -428,12 +431,13 @@ const VideoSection: React.FC = () => {
             {/* HTML Slide (Considered Content/Video) */}
             {isHtmlSlideActive && currentSlide && (
               <div className="absolute inset-0 z-40 bg-black">
-                {/* Fix: quitado mute=1 (silenciaba el audio HTML). allow="autoplay" es suficiente para HTML slides */}
                 <iframe
-                  src={`${currentSlide.url}${currentSlide.url.includes('?') ? '&' : '?'}autoplay=1`}
-                  className="w-full h-full border-none pointer-events-none"
-                  title="Slide"
-                  allow="autoplay"
+                  src={`${typeof currentSlide === 'string' ? currentSlide : currentSlide.url}${
+                    (typeof currentSlide === 'string' ? currentSlide : currentSlide.url).includes('?') ? '&' : '?'
+                  }autoplay=1`}
+                  className="w-full h-full border-none pointer-events-auto"
+                  title={typeof currentSlide === 'object' ? currentSlide?.title || "Slide Noticia" : "Slide Noticia"}
+                  allow="autoplay; fullscreen"
                 />
               </div>
             )}
