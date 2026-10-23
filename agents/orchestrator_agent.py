@@ -2,13 +2,14 @@
 """
 agents/orchestrator_agent.py — Agente Maestro de Orquestación Periodística
 ========================================================================
-Coordina de forma autónoma el ciclo completo de 6 pasos requerido para Saladillo Vivo:
+Coordina de forma autónoma el ciclo completo de 7 pasos requerido para Saladillo Vivo:
   1. Scraping de noticias locales (ScraperAgent)
   2. Guardado en base de datos como borrador/raw (StorageAgent)
   3. Modificación de título y texto con IA (AiRewriterAgent)
   4. Generación y optimización de audio locutado (AudioGeneratorAgent)
-  5. Actualización en base de datos con IA y audio_url (StorageAgent)
-  6. Publicación oficial final en vivo (PublisherAgent)
+  5. Generación de slides interactivos con fotos y voz rioplatense (SlideGeneratorAgent)
+  6. Actualización en base de datos con IA, audio_url y url_slide (StorageAgent)
+  7. Publicación oficial final en vivo (PublisherAgent)
 
 Características:
 - Programación dinámica por franjas horarias (30 min / 1 hora / 3 horas).
@@ -29,6 +30,7 @@ from .scraper_agent import ScraperAgent
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
 from .audio_generator_agent import AudioGeneratorAgent
+from .slide_generator_agent import SlideGeneratorAgent
 from .publisher_agent import PublisherAgent
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,10 +57,11 @@ class OrchestratorAgent:
     """
     Orquestador multi-agente del ciclo de noticias y streaming de audio.
     """
-    def __init__(self, limit_per_source=10, immediate_publish=True, enable_audio=True):
+    def __init__(self, limit_per_source=10, immediate_publish=True, enable_audio=True, enable_slides=True):
         self.limit_per_source = limit_per_source
         self.immediate_publish = immediate_publish
         self.enable_audio = enable_audio
+        self.enable_slides = enable_slides
         self.running = False
         self.thread = None
         self.last_execution = None
@@ -70,6 +73,7 @@ class OrchestratorAgent:
         self.storage_agent = StorageAgent()
         self.rewriter_agent = AiRewriterAgent()
         self.audio_agent = AudioGeneratorAgent()
+        self.slide_agent = SlideGeneratorAgent()
         self.publisher_agent = PublisherAgent(self.storage_agent)
 
     def get_next_execution_time(self, current_dt=None):
@@ -203,7 +207,7 @@ class OrchestratorAgent:
         # ----------------------------------------------------------------------
         audios_generated = 0
         if self.enable_audio:
-            logger.info("🎙️ [PASO 4/6] AudioGeneratorAgent: Generando locución en audio y subiendo a Storage...")
+            logger.info("🎙️ [PASO 4/7] AudioGeneratorAgent: Generando locución en audio y subiendo a Storage...")
             for art in modified_list:
                 art_id = art.get('id')
                 title = art.get('titulo_ia') or art.get('title')
@@ -220,32 +224,61 @@ class OrchestratorAgent:
                     art['audio_url'] = audio_url
                     audios_generated += 1
                 time.sleep(1.2)
-            logger.info(f"✅ [PASO 4/6] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
+            logger.info(f"✅ [PASO 4/7] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
         else:
-            logger.info("ℹ️ [PASO 4/6] Generación de audio omitida por configuración.")
+            logger.info("ℹ️ [PASO 4/7] Generación de audio omitida por configuración.")
 
         # ----------------------------------------------------------------------
-        # PASO 5: OTRA VEZ GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA Y AUDIO)
+        # PASO 5: GENERACIÓN DE SLIDES CON VOZ RIOPLATENSE
         # ----------------------------------------------------------------------
-        logger.info("🔄 [PASO 5/6] StorageAgent: Actualizando registros en Supabase con datos de IA y audio...")
+        slides_generated = 0
+        if self.enable_slides:
+            logger.info("🎬 [PASO 5/7] SlideGeneratorAgent: Generando slides dinámicos con fotos y voz rioplatense...")
+            for art in modified_list:
+                art_id = art.get('id')
+                title = art.get('titulo_ia') or art.get('title')
+                text = art.get('contenido_ia') or art.get('text')
+                audio_url = art.get('audio_url') or ''
+                image_urls = [art.get('image_url')] if art.get('image_url') else []
+
+                slide_url = self.slide_agent.process_article_slide(
+                    article_id=art_id,
+                    title=title,
+                    text=text,
+                    audio_url=audio_url,
+                    image_urls=image_urls
+                )
+                if slide_url:
+                    art['url_slide'] = slide_url
+                    slides_generated += 1
+                time.sleep(1.5)
+            logger.info(f"✅ [PASO 5/7] Slides generados y subidos: {slides_generated}/{len(modified_list)} artículos.")
+        else:
+            logger.info("ℹ️ [PASO 5/7] Generación de slides omitida por configuración.")
+
+        # ----------------------------------------------------------------------
+        # PASO 6: GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA, AUDIO Y SLIDE)
+        # ----------------------------------------------------------------------
+        logger.info("🔄 [PASO 6/7] StorageAgent: Actualizando registros en Supabase con IA, audio y slides...")
         updated_count = 0
         for art in modified_list:
             art_id = art.get('id')
-            upd = self.storage_agent.update_with_ai_and_audio(
+            upd = self.storage_agent.update_with_ai_audio_and_slide(
                 article_id=art_id,
                 ai_data=art,
-                audio_url=art.get('audio_url')
+                audio_url=art.get('audio_url'),
+                slide_url=art.get('url_slide')
             )
             if upd:
                 updated_count += 1
             time.sleep(0.5)
 
-        logger.info(f"✅ [PASO 5/6] Base de datos actualizada: {updated_count}/{len(modified_list)} artículos.")
+        logger.info(f"✅ [PASO 6/7] Base de datos actualizada: {updated_count}/{len(modified_list)} artículos.")
 
         # ----------------------------------------------------------------------
-        # PASO 6: FINALMENTE PUBLICAR
+        # PASO 7: FINALMENTE PUBLICAR
         # ----------------------------------------------------------------------
-        logger.info("📢 [PASO 6/6] PublisherAgent: Publicando oficialmente...")
+        logger.info("📢 [PASO 7/7] PublisherAgent: Publicando oficialmente...")
         published_count = 0
         for art in modified_list:
             art_id = art.get('id')
@@ -255,7 +288,7 @@ class OrchestratorAgent:
                 published_count += 1
             time.sleep(0.5)
 
-        logger.info(f"✅ [PASO 6/6] Publicación completada: {published_count}/{len(modified_list)} noticias en vivo.")
+        logger.info(f"✅ [PASO 7/7] Publicación completada: {published_count}/{len(modified_list)} noticias en vivo.")
 
         # Generar reporte de ciclo
         duration = datetime.now() - start_time
@@ -268,7 +301,8 @@ class OrchestratorAgent:
             'drafts_saved_to_db': len(articles_to_process),
             'ai_modified_count': len(modified_list),
             'audios_generated_count': audios_generated,
-            'db_updated_with_ai_and_audio': updated_count,
+            'slides_generated_count': slides_generated,
+            'db_updated_with_ai_audio_slide': updated_count,
             'published_count': published_count,
             'success_rate': (published_count / len(modified_list) * 100) if modified_list else 100.0,
             'timestamp': datetime.now().isoformat()

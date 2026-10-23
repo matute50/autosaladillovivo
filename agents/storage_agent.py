@@ -194,11 +194,11 @@ class StorageAgent:
     # --------------------------------------------------------------------------
     # PASO 5: OTRA VEZ GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA Y AUDIO)
     # --------------------------------------------------------------------------
-    def update_with_ai(self, article_id, ai_data, audio_url=None):
+    def update_with_ai(self, article_id, ai_data, audio_url=None, slide_url=None):
         """
-        Actualiza el registro existente en Supabase con los datos reestructurados por la IA
-        y la URL de audio si fue generada.
-        Actualiza title, text, description, metadatos SEO, keywords, featureStatus y audio_url.
+        Actualiza el registro existente en Supabase con los datos reestructurados por la IA,
+        la URL de audio y la URL del slide interactivo si fueron generados.
+        Actualiza title, text, description, metadatos SEO, keywords, featureStatus, audio_url y url_slide.
         """
         if not article_id:
             print("  [StorageAgent] Error: Se requiere article_id para actualizar.")
@@ -210,6 +210,7 @@ class StorageAgent:
         description = ai_data.get('meta_description') or ai_data.get('description')
         feature_status = ai_data.get('featureStatus') or 'secondary'
         final_audio_url = audio_url or ai_data.get('audio_url')
+        final_slide_url = slide_url or ai_data.get('url_slide') or ai_data.get('slide_url')
 
         raw_keywords = ai_data.get('meta_keywords') or ai_data.get('palabras_clave') or []
         keywords_str = ', '.join(raw_keywords) if isinstance(raw_keywords, list) else str(raw_keywords)
@@ -229,6 +230,9 @@ class StorageAgent:
         if final_audio_url:
             patch_payload['audio_url'] = final_audio_url
 
+        if final_slide_url:
+            patch_payload['url_slide'] = final_slide_url
+
         current_payload = dict(patch_payload)
         headers = self.get_headers(return_representation=True)
 
@@ -242,7 +246,8 @@ class StorageAgent:
             )
             if resp.status_code in (200, 204):
                 audio_tag = f" | Audio: [OK]" if final_audio_url else ""
-                print(f"  [StorageAgent] [Paso 5: Actualizado en BD con IA{audio_tag}] ID: {article_id} | Titulo: \"{title[:40]}...\"")
+                slide_tag = f" | Slide: [OK]" if final_slide_url else ""
+                print(f"  [StorageAgent] [Paso 5: Actualizado en BD con IA{audio_tag}{slide_tag}] ID: {article_id} | Titulo: \"{title[:40]}...\"")
                 try:
                     res_json = resp.json()
                     return res_json[0] if (isinstance(res_json, list) and len(res_json) > 0) else current_payload
@@ -260,9 +265,13 @@ class StorageAgent:
 
         return None
 
-    def update_with_ai_and_audio(self, article_id, ai_data, audio_url=None):
-        """Alias explícito para actualizar con IA y Audio."""
-        return self.update_with_ai(article_id, ai_data, audio_url=audio_url)
+    def update_with_ai_and_audio(self, article_id, ai_data, audio_url=None, slide_url=None):
+        """Alias explícito para actualizar con IA y Audio/Slide."""
+        return self.update_with_ai(article_id, ai_data, audio_url=audio_url, slide_url=slide_url)
+
+    def update_with_ai_audio_and_slide(self, article_id, ai_data, audio_url=None, slide_url=None):
+        """Actualiza artículo con IA, audio y slide (compatibilidad total con SlideGeneratorAgent)."""
+        return self.update_with_ai(article_id, ai_data, audio_url=audio_url, slide_url=slide_url)
 
     def find_pending_ai_articles(self, limit=20):
         """Busca artículos en la base de datos que estén en estado 'draft' y no procesados por IA."""

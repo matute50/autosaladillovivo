@@ -45,6 +45,7 @@ from agents.scraper_agent import ScraperAgent
 from agents.storage_agent import StorageAgent
 from agents.ai_rewriter_agent import AiRewriterAgent
 from agents.audio_generator_agent import AudioGeneratorAgent
+from agents.slide_generator_agent import SlideGeneratorAgent
 from agents.publisher_agent import PublisherAgent
 
 # Directorios de trabajo
@@ -77,15 +78,17 @@ class NewsAutomationSystem:
     """
     Controlador maestro del pipeline de 6 pasos para Saladillo Vivo.
     """
-    def __init__(self, limit_per_source=10, run_immediately=True, immediate_publish=True, enable_audio=True):
+    def __init__(self, limit_per_source=10, run_immediately=True, immediate_publish=True, enable_audio=True, enable_slides=True):
         self.limit_per_source = limit_per_source
         self.run_immediately = run_immediately
         self.immediate_publish = immediate_publish
         self.enable_audio = enable_audio
+        self.enable_slides = enable_slides
         self.orchestrator = OrchestratorAgent(
             limit_per_source=limit_per_source,
             immediate_publish=immediate_publish,
-            enable_audio=enable_audio
+            enable_audio=enable_audio,
+            enable_slides=enable_slides
         )
         self.running = False
         self.thread = None
@@ -151,14 +154,16 @@ def main():
     parser.add_argument('--limit', type=int, default=10, help='Límite de artículos por portal (default: 10)')
     parser.add_argument('--no-immediate', action='store_true', help='Publicar en estado no inmediato (para delegar al cron de Make.com)')
     parser.add_argument('--no-audio', action='store_true', help='Desactivar generación automática de audio')
+    parser.add_argument('--no-slides', action='store_true', help='Desactivar generación automática de slides interactivos')
 
     args = parser.parse_args()
 
     print("=================================================================")
-    print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS Y AUDIO")
+    print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS, AUDIO Y SLIDES")
     print(f" Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f" Modo: {'Ejecución Única (--once)' if args.single_run else 'Servicio Continuo Automático'}")
     print(f" Generación de audio: {'Desactivada (--no-audio)' if args.no_audio else 'Activada (gTTS + Pydub + Supabase Storage)'}")
+    print(f" Generación de slides: {'Desactivada (--no-slides)' if args.no_slides else 'Activada (Voz Rioplatense + Jinja2 + Slides Storage)'}")
     print(f" Archivo de Log: {LOG_FILE}")
     print("=================================================================")
 
@@ -166,7 +171,8 @@ def main():
         limit_per_source=args.limit,
         run_immediately=True,
         immediate_publish=not args.no_immediate,
-        enable_audio=not args.no_audio
+        enable_audio=not args.no_audio,
+        enable_slides=not args.no_slides
     )
 
     if args.single_run:

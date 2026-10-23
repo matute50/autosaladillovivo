@@ -14,6 +14,7 @@ import WeatherOverlay from '@/components/tv/WeatherOverlay';
 import { cn, cleanTitle } from '@/lib/utils';
 import { Play } from 'lucide-react';
 import AntiGravityLayer from './AntiGravityLayer';
+import { NewsSlidePlayer } from '@/components/NewsSlidePlayer';
 
 // Simplified VideoSection for Desktop Only
 
@@ -38,7 +39,7 @@ const VideoSection: React.FC = () => {
     finishIntro,
   } = usePlayerStore();
 
-  const { currentSlide, isPlaying: isSlidePlaying, stopSlide, isNewsIntroActive, setIsNewsIntroActive } = useNewsPlayerStore();
+  const { currentSlide, isPlaying: isSlidePlaying, stopSlide, isNewsIntroActive, setIsNewsIntroActive, isSlideOpen, closeSlide } = useNewsPlayerStore();
   const { volume, setVolume, isMuted, unmute } = useVolumeStore(); // Added unmute
 
   // Auto-Unmute for News or HTML Slides
@@ -658,6 +659,14 @@ const VideoSection: React.FC = () => {
         </div>
       </div >
       {viewMode === 'diario' && <VideoTitleBar className="mt-0 rounded-t-none border-t-0" />}
+
+      {/* Modal de Slide Interactivo con Voz Rioplatense */}
+      {isSlideOpen && currentSlide?.url && (
+        <NewsSlidePlayer 
+          slideUrl={currentSlide.url} 
+          onClose={closeSlide} 
+        />
+      )}
     </div >
   );
 
