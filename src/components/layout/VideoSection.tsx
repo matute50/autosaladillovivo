@@ -43,15 +43,25 @@ const VideoSection: React.FC = () => {
   const { volume, setVolume, isMuted, unmute } = useVolumeStore(); // Added unmute
 
   // Auto-Unmute for News or HTML Slides
-  const isHtmlSlideActive = !!(isSlidePlaying && currentSlide && (
-    (typeof currentSlide === 'object' && (currentSlide.type === 'html' || currentSlide.url?.includes('.html') || currentSlide.url?.includes('/slides/'))) ||
-    (typeof currentSlide === 'string' && (currentSlide.includes('.html') || currentSlide.includes('/slides/')))
-  ));
+  const isNewsSlide = !!(
+    (isSlidePlaying && currentSlide && (
+      Boolean((currentSlide as any)?.type === 'html' || (currentSlide as any)?.url?.includes('.html') || (currentSlide as any)?.url?.includes('/slides/'))
+    )) ||
+    (currentVideo?.type === 'html') ||
+    Boolean(currentVideo?.url_slide && (currentVideo.url_slide.includes('.html') || currentVideo.url_slide.includes('/slides/')))
+  );
+
+  const isNewsImageAudio = !isNewsSlide && !!(
+    currentVideo?.type === 'image' ||
+    (!currentVideo?.url && !!(currentVideo?.audioSourceUrl || currentVideo?.imagen))
+  );
+
+  const isHtmlSlideActive = isNewsSlide;
   const isLocalIntro = currentVideo?.url && (
     currentVideo.url.startsWith('/') ||
     currentVideo.url.includes('videos_intro')
   ) || false;
-  const isNewsContent = !!(currentVideo?.categoria === 'Noticias' && !isLocalIntro);
+  const isNewsContent = !!((currentVideo?.categoria === 'Noticias' || isNewsSlide || isNewsImageAudio) && !isLocalIntro);
 
   // P2-fix: el volumen y unmute se gestionan ahora directamente en el useEffect de activación del slide
   // para mayor precisión y cumplimiento de políticas de autoplay.
@@ -161,61 +171,33 @@ const VideoSection: React.FC = () => {
     }
   }, [isHtmlSlideActive, currentSlide?.url, stopSlide, resumeAfterSlide, pauseForSlide]);
 
-  // 2. Sincronización de Audio (Efectos secundarios independientes)
+  // 2. Sincronización de Audio Centralizada (Inicia exactamente al terminar la presentación/intro)
   useEffect(() => {
-    // Si es un slide HTML y no hemos empezado el audio
-    if (isHtmlSlideActive && currentSlide && !hasStartedAudioRef.current) {
-      const audioUrl = currentSlide.audioUrl;
-
-      if (!audioUrl || audioUrl === 'NO_AUDIO_URL') {
-        console.warn('[AudioSlide] Reproducción de audio cancelada:', { 
-          motivo: !audioUrl ? 'audioUrl no existe en el objeto slide' : 'audioUrl es NO_AUDIO_URL',
-          slideData: currentSlide,
-          isHtmlActive: isHtmlSlideActive
-        });
-        return;
-      }
-
-      console.log('[AudioSlide] Preparando audio:', audioUrl);
-
-      hasStartedAudioRef.current = true; 
-      const playTimer = setTimeout(() => {
-        if (audioRef.current) {
-          audioRef.current.muted = false;
-          audioRef.current.volume = 1;
-          audioRef.current.src = audioUrl; // <--- FUNDAMENTAL: Asignar la fuente
-
-          const playAudio = () => {
-             console.log("[AudioSlide] Evento canplay recibido. Ejecutando .play()");
-             audioRef.current?.play()
-              .then(() => console.log("[AudioSlide] Reproducción iniciada correctamente"))
-              .catch((err) => console.error('[AudioSlide] ERROR CRÍTICO PLAY:', err));
-             audioRef.current?.removeEventListener('canplay', playAudio);
-          };
-
-          audioRef.current.addEventListener('canplay', playAudio);
-          audioRef.current.load();
-        }
-      }, 500); 
-
-      return () => {
-        clearTimeout(playTimer);
-        // NO reseteamos aquí el ref para evitar re-triggers por re-renders,
-        // el reseteo real ocurre abajo cuando cambia el slide.
-      };
+    // Si la intro de presentación está reproduciéndose, esperar a que termine
+    if (isPreRollOverlayActive) {
+      return;
     }
-  }, [isHtmlSlideActive, currentSlide, unmute, setVolume]);
 
-  // RESET de audio-ref cuando cambia el contenido o se desactiva
-  useEffect(() => {
-    if (!isHtmlSlideActive) {
-      hasStartedAudioRef.current = false;
+    const audioUrl = (isNewsSlide && (currentSlide?.audioUrl || currentVideo?.audioSourceUrl)) || currentVideo?.audioSourceUrl;
+
+    if (audioUrl && audioUrl !== 'NO_AUDIO_URL') {
       if (audioRef.current) {
+        audioRef.current.muted = false;
+        audioRef.current.volume = isMuted ? 0 : (volume || 1);
+        if (audioRef.current.src !== audioUrl) {
+          audioRef.current.src = audioUrl;
+        }
+        audioRef.current.play().catch((err) => {
+          console.warn("[VideoSection] Play audio noticia:", err);
+        });
+      }
+    } else if (!isNewsSlide && !isNewsImageAudio) {
+      if (audioRef.current && !audioRef.current.paused) {
         audioRef.current.pause();
         audioRef.current.src = "";
       }
     }
-  }, [isHtmlSlideActive]);
+  }, [isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume]);
 
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
@@ -402,8 +384,8 @@ const VideoSection: React.FC = () => {
   };
 
 
-  const displayTitle = cleanTitle(currentVideo?.nombre);
-  const displaySubtitle = (currentVideo as any)?.resumen || (currentVideo as any)?.description;
+  const displayTitle = cleanTitle(currentVideo?.nombre || (typeof currentSlide === 'object' ? currentSlide?.title : undefined));
+  const displaySubtitle = (currentVideo as any)?.resumen || (currentVideo as any)?.description || (typeof currentSlide === 'object' ? currentSlide?.subtitle : undefined);
 
   return (
     <div className="w-full overflow-visible">
@@ -428,38 +410,47 @@ const VideoSection: React.FC = () => {
             }}
           >
 
-            {/* HTML Slide (Considered Content/Video) */}
-            {isHtmlSlideActive && currentSlide && (
+            {/* 1. SLIDE INTERACTIVO HTML (TV-GRADE) */}
+            {isNewsSlide && (currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (
               <div className="absolute inset-0 z-40 bg-black">
                 <iframe
-                  src={`${typeof currentSlide === 'string' ? currentSlide : currentSlide.url}${
-                    (typeof currentSlide === 'string' ? currentSlide : currentSlide.url).includes('?') ? '&' : '?'
+                  src={`${typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url)}${
+                    (typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url || '')).includes('?') ? '&' : '?'
                   }autoplay=1`}
                   className="w-full h-full border-none pointer-events-auto"
-                  title={typeof currentSlide === 'object' ? currentSlide?.title || "Slide Noticia" : "Slide Noticia"}
+                  title={typeof currentSlide === 'object' ? currentSlide?.title || currentVideo?.nombre || "Slide Noticia" : "Slide Noticia"}
                   allow="autoplay; fullscreen"
                 />
               </div>
             )}
 
-            {/* P2-fix: Audio presente si es Slide HTML, la URL se gestiona por efecto AudioSync (v27.2) */}
-            {isHtmlSlideActive && !currentSlide?.embedsAudio && (
-              <audio
-                ref={audioRef}
-                className="opacity-0 pointer-events-none absolute"
-                preload="auto"
-                crossOrigin="anonymous"
-                onError={(e) => console.error("Error reproduciendo audio de noticia:", e, currentSlide?.audioUrl)}
-              />
+            {/* 2. NOTICIA CON FOTO Y AUDIO (CUANDO NO HAY SLIDE HTML PERO SÍ FOTO/AUDIO) */}
+            {isNewsImageAudio && (
+              <motion.div
+                key={`news-image-${currentVideo?.id}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.75 }}
+                className="absolute inset-0 z-30 bg-black flex items-center justify-center overflow-hidden"
+              >
+                {currentVideo?.imagen && (
+                  <Image
+                    src={currentVideo.imagen}
+                    alt={currentVideo.nombre || "Noticia"}
+                    fill
+                    className="object-cover scale-105"
+                    priority
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/60 pointer-events-none" />
+              </motion.div>
             )}
 
-
-
-
-            {/* === SINGLE POWER PLAYER (v23.9) === */}
+            {/* 3. REPRODUCTOR TRADICIONAL (YOUTUBE / HLS) */}
             <div className="absolute inset-0 bg-black">
               <AnimatePresence mode="wait">
-                {currentVideo?.url && !isHtmlSlideActive && (
+                {currentVideo?.url && !isNewsSlide && !isNewsImageAudio && (
                   <motion.div
                     key={currentVideo.id}
                     initial={{ opacity: 0 }}
@@ -473,7 +464,6 @@ const VideoSection: React.FC = () => {
                       key={currentVideo.id}
                       id={currentVideo.id}
                       videoUrl={currentVideo.url}
-                      // Forzamos autoplay incluso durante el overlay de intro para pre-buffer masivo (v25.3)
                       autoplay={isPlaying && (isContentPlaying || isInitialLoadRef.current)}
                       muted={(!isPlaying || !isContentPlaying)}
                       imageUrl={currentVideo.imagen}
@@ -496,6 +486,16 @@ const VideoSection: React.FC = () => {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* ELEMENTO AUDIO CENTRALIZADO TOP-LEVEL PARA NOTICIAS (GARANTIZA VOLUMEN AUDIBLE) */}
+            <audio
+              ref={audioRef}
+              className="opacity-0 pointer-events-none absolute"
+              preload="auto"
+              crossOrigin="anonymous"
+              playsInline
+              onError={(e) => console.error("Error reproduciendo audio:", e)}
+            />
 
             {/* === PERSISTENT INTRO OVERLAY === */}
             <div

@@ -49,7 +49,7 @@ export interface Video {
   isLiveThumbnail?: boolean;
   isEvent?: boolean;
   forzar_video?: boolean;
-  type?: 'video' | 'stream' | 'image';
+  type?: 'video' | 'stream' | 'image' | 'html';
   title?: string;
   duration?: number;
   volumen_extra?: number;
@@ -58,6 +58,7 @@ export interface Video {
 export interface SlideMedia extends Video {
   imageSourceUrl?: string;
   audioSourceUrl?: string;
+  url_slide?: string;
   resumen?: string;
   startAt?: number;
 }

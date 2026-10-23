@@ -62,96 +62,68 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
 
 
 
-  // Lógica para REPRODUCIR (Clic en toda la tarjeta)
+  const scrollToPlayer = () => {
+    if (typeof window !== 'undefined') {
+      const playerEl = document.querySelector('.video-universe') || document.querySelector('[data-player-container]');
+      if (playerEl) {
+        playerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  };
+
+  // Lógica para REPRODUCIR (Clic en toda la tarjeta con Presentación TV-Grade)
   const handlePlaySlide = (e: React.MouseEvent) => {
     e.preventDefault();
     
-    if (isHtmlSlide) {
-        if (playSlide) {
-            // EXTRACCIÓN AGRESIVA (v27.3)
-            const rawAudio = newsItem.audio_url || newsItem.audioUrl || newsItem.audioSourceUrl || newsItem.media_url || (newsItem.audio ? newsItem.audio.url : undefined);
-            
-            console.group('[NewsCard-Extraction]');
-            console.log('Item Original:', newsItem);
-            console.log('Claves encontradas:', Object.keys(newsItem));
-            console.log('Valor crudo audio:', rawAudio);
-            
-            let finalAudioUrl = null;
-            if (rawAudio) {
-                const clean = rawAudio.trim();
-                if (clean.startsWith('http')) {
-                    finalAudioUrl = clean;
-                } else {
-                    const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || 'https://media.saladillovivo.com.ar';
-                    finalAudioUrl = `${mediaUrl}${clean.startsWith('/') ? '' : '/'}${clean}`;
-                }
-            }
-
-            console.log('URL Final Calculada:', finalAudioUrl);
-            console.groupEnd();
-
-            playSlide({
-                url: urlSlide,
-                type: 'html',
-                duration: Math.max(duration || 35, 35),
-                audioUrl: finalAudioUrl,
-                title: title,
-                embedsAudio: true
-            });
-
-            if (typeof window !== 'undefined') {
-                const playerEl = document.querySelector('.video-universe') || document.querySelector('[data-player-container]');
-                if (playerEl) {
-                    playerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                } else {
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-            }
-        }
-        return;
+    // EXTRACCIÓN DE AUDIO
+    const rawAudio = newsItem.audio_url || newsItem.audioUrl || newsItem.audioSourceUrl || newsItem.media_url || (newsItem.audio ? newsItem.audio.url : undefined);
+    let finalAudioUrl: string | null = null;
+    if (rawAudio) {
+      const clean = rawAudio.trim();
+      if (clean.startsWith('http')) {
+        finalAudioUrl = clean;
+      } else {
+        const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || 'https://media.saladillovivo.com.ar';
+        finalAudioUrl = `${mediaUrl}${clean.startsWith('/') ? '' : '/'}${clean}`;
+      }
     }
 
-    let mediaData: SlideMedia | null = null;
+    const slideDuration = Math.max(duration || 35, 35);
 
-    if (hasSlide && !isHtmlSlide) {
-        mediaData = {
-            id: newsItem.id.toString(),
-            type: 'video', 
-            url: urlSlide,
-            nombre: title,
-            createdAt: createdAt,
-            categoria: 'Noticias',
-            imagen: finalImageUrl,
-            novedad: true,
-            duration: duration
-        };
-    } else if (hasAudioImage) {
-        mediaData = {
-            id: newsItem.id.toString(),
-            type: 'image',
-            url: "", 
-            imageSourceUrl: finalImageUrl,
-            audioSourceUrl: audioUrl,
-            nombre: title,
-            createdAt: createdAt,
-            categoria: 'Noticias',
-            imagen: finalImageUrl,
-            novedad: true,
-            duration: duration
-        };
+    const mediaData: SlideMedia = {
+      id: newsItem.id.toString(),
+      type: isHtmlSlide ? 'html' : (hasSlide ? 'video' : 'image'),
+      url: urlSlide || "",
+      url_slide: urlSlide || undefined,
+      imageSourceUrl: finalImageUrl,
+      audioSourceUrl: finalAudioUrl || audioUrl || undefined,
+      nombre: title,
+      createdAt: createdAt,
+      categoria: 'Noticias',
+      imagen: finalImageUrl,
+      novedad: true,
+      duration: slideDuration
+    };
+
+    // 1. Iniciar experiencia TV-Grade con presentación de noticias
+    playTemporaryVideo(mediaData, undefined, setVolume);
+
+    // 2. Si tiene slide interactivo, preparar el store sincronizado
+    if (isHtmlSlide && urlSlide) {
+      playSlide({
+        url: urlSlide,
+        type: 'html',
+        duration: slideDuration,
+        audioUrl: finalAudioUrl || audioUrl || null,
+        title: title,
+        embedsAudio: false
+      });
     }
 
-    if (mediaData) {
-        playTemporaryVideo(mediaData, undefined, setVolume);
-        if (typeof window !== 'undefined') {
-            const playerEl = document.querySelector('.video-universe') || document.querySelector('[data-player-container]');
-            if (playerEl) {
-                playerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } else {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        }
-    }
+    // 3. Auto-scroll suave hacia el reproductor multimedia
+    scrollToPlayer();
   };
 
   const priority = index < 4;
