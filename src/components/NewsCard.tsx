@@ -73,7 +73,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
     }
   };
 
-  // Lógica para REPRODUCIR (Clic en toda la tarjeta con Presentación TV-Grade)
+  // Lógica para REPRODUCIR (Clic en toda la tarjeta con Presentación y Slide TV-Grade)
   const handlePlaySlide = (e: React.MouseEvent) => {
     e.preventDefault();
     
@@ -92,25 +92,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
 
     const slideDuration = Math.max(duration || 35, 35);
 
-    const mediaData: SlideMedia = {
-      id: newsItem.id.toString(),
-      type: isHtmlSlide ? 'html' : (hasSlide ? 'video' : 'image'),
-      url: urlSlide || "",
-      url_slide: urlSlide || undefined,
-      imageSourceUrl: finalImageUrl,
-      audioSourceUrl: finalAudioUrl || audioUrl || undefined,
-      nombre: title,
-      createdAt: createdAt,
-      categoria: 'Noticias',
-      imagen: finalImageUrl,
-      novedad: true,
-      duration: slideDuration
-    };
-
-    // 1. Iniciar experiencia TV-Grade con presentación de noticias
-    playTemporaryVideo(mediaData, undefined, setVolume);
-
-    // 2. Si tiene slide interactivo, preparar el store sincronizado
+    // 1. Si la noticia tiene slide interactivo HTML
     if (isHtmlSlide && urlSlide) {
       playSlide({
         url: urlSlide,
@@ -120,9 +102,26 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
         title: title,
         embedsAudio: false
       });
+      scrollToPlayer();
+      return;
     }
 
-    // 3. Auto-scroll suave hacia el reproductor multimedia
+    // 2. Si la noticia es imagen + audio o video
+    let mediaData: SlideMedia = {
+      id: newsItem.id.toString(),
+      type: hasSlide ? 'video' : 'image',
+      url: (hasSlide && !isHtmlSlide) ? urlSlide : "",
+      imageSourceUrl: finalImageUrl,
+      audioSourceUrl: finalAudioUrl || audioUrl,
+      nombre: title,
+      createdAt: createdAt,
+      categoria: 'Noticias',
+      imagen: finalImageUrl,
+      novedad: true,
+      duration: slideDuration
+    };
+
+    playTemporaryVideo(mediaData, undefined, setVolume);
     scrollToPlayer();
   };
 

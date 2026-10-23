@@ -87,7 +87,37 @@ const VideoSection: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const introVideoRef = useRef<HTMLVideoElement>(null);
   const [isIntroFadingOut, setIsIntroFadingOut] = useState(false);
+  const [slideHtmlContent, setSlideHtmlContent] = useState<string | null>(null);
 
+
+
+  // Carga asíncrona del HTML del slide para renderizar vía srcDoc (evita bloqueo CSP default-src: none de Supabase Storage)
+  useEffect(() => {
+    const rawUrl = typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide);
+    if (!rawUrl || !rawUrl.includes('.html')) {
+      setSlideHtmlContent(null);
+      return;
+    }
+
+    let isMounted = true;
+    fetch(rawUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.text();
+      })
+      .then((html) => {
+        if (isMounted && html && html.includes('<!DOCTYPE html>')) {
+          setSlideHtmlContent(html);
+        }
+      })
+      .catch((err) => {
+        console.warn("[VideoSection] Fetch slide HTML fallback:", err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentSlide, currentVideo?.url_slide]);
 
   // --- SINGLE PLAYER LOGIC (v23.9) ---
 
@@ -171,10 +201,10 @@ const VideoSection: React.FC = () => {
     }
   }, [isHtmlSlideActive, currentSlide?.url, stopSlide, resumeAfterSlide, pauseForSlide]);
 
-  // 2. Sincronización de Audio Centralizada (Inicia exactamente al terminar la presentación/intro)
+  // 2. Sincronización de Audio Centralizada (Inicia exactamente al terminar la presentación/intro de noticias)
   useEffect(() => {
-    // Si la intro de presentación está reproduciéndose, esperar a que termine
-    if (isPreRollOverlayActive) {
+    // Si la intro de noticias o overlay está activo, esperar a que termine
+    if (isNewsIntroActive || isPreRollOverlayActive) {
       return;
     }
 
@@ -197,7 +227,7 @@ const VideoSection: React.FC = () => {
         audioRef.current.src = "";
       }
     }
-  }, [isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume]);
+  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume]);
 
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
@@ -410,15 +440,15 @@ const VideoSection: React.FC = () => {
             }}
           >
 
-            {/* 1. SLIDE INTERACTIVO HTML (TV-GRADE) */}
-            {isNewsSlide && (currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (
+            {/* 1. SLIDE INTERACTIVO HTML (TV-GRADE con srcDoc para evitar bloqueo CSP default-src none de Supabase Storage) */}
+            {isNewsSlide && (slideHtmlContent || currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (
               <div className="absolute inset-0 z-40 bg-black">
                 <iframe
-                  src={`${typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url)}${
-                    (typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url || '')).includes('?') ? '&' : '?'
-                  }autoplay=1`}
+                  srcDoc={slideHtmlContent || undefined}
+                  src={slideHtmlContent ? undefined : (typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url))}
                   className="w-full h-full border-none pointer-events-auto"
                   title={typeof currentSlide === 'object' ? currentSlide?.title || currentVideo?.nombre || "Slide Noticia" : "Slide Noticia"}
+                  sandbox="allow-same-origin allow-scripts allow-forms"
                   allow="autoplay; fullscreen"
                 />
               </div>
@@ -559,7 +589,7 @@ const VideoSection: React.FC = () => {
                   initial={{ opacity: 1 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  transition={{ duration: 1 }}
+                  transition={{ duration: 0.5 }}
                   className="absolute inset-0 z-[998] bg-black"
                 >
                   <video
@@ -568,8 +598,12 @@ const VideoSection: React.FC = () => {
                     playsInline
                     muted
                     className="w-full h-full object-contain"
-                    onPlay={() => { }}
-                    onLoadedMetadata={handleIntroMetadata}
+                    onEnded={() => {
+                      setIsNewsIntroActive(false);
+                    }}
+                    onError={() => {
+                      setIsNewsIntroActive(false);
+                    }}
                   />
                 </motion.div>
               )}
