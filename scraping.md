@@ -1,6 +1,6 @@
 # Saladillo Vivo Pro — Documentación de Arquitectura y Especificación Técnica del Sistema (`scraping.md`)
 
-> **Propósito de este documento**: Proveer un compendio exhaustivo y de nivel técnico de toda la plataforma **Saladillo Vivo** (Next.js 15, React 19, Supabase, TailwindCSS, Zustand). Este archivo sirve como base de conocimiento, fuente de verdad y contexto maestro para que un agente de Inteligencia Artificial (o desarrollador) pueda redactar prompts precisos, planificar refactorizaciones o programar futuras ampliaciones sin degradar las características críticas de la plataforma (reproducción "TV-Grade", anti-branding de YouTube, estado desacoplado y optimizaciones de base de datos).
+> **Propósito de este documento**: Proveer un compendio exhaustivo y de nivel técnico de toda la plataforma **Saladillo Vivo** (Next.js 15, React 19, Supabase, TailwindCSS, Zustand) y su **Sistema Autónomo de Automatización de Noticias Multi-Agente**. Este archivo sirve como base de conocimiento, fuente de verdad y contexto maestro para que un agente de Inteligencia Artificial (o desarrollador) pueda redactar prompts precisos, planificar refactorizaciones o programar futuras ampliaciones sin degradar las características críticas de la plataforma (reproducción "TV-Grade", anti-branding de YouTube, estado desacoplado y optimizaciones de base de datos).
 
 ---
 
@@ -13,6 +13,7 @@
 2. **Anti-Branding Cinematográfico**: Toda fuente externa de streaming (principalmente YouTube) debe ser enmascarada para eliminar logotipos, títulos nativos, marcas de agua, barras de controles y sugerencias de videos externos.
 3. **Multi-Dispositivo Reactivo**: Adaptación de interfaz según el dispositivo y entorno (Desktop, Smart TV con control remoto, dispositivos móviles y PWA instalable).
 4. **Rendimiento y Eficiencia de Red**: Consumo selectivo de datos en Supabase a través de vistas y Funciones Almacenadas (RPC), reduciendo cargas masivas de datos a payloads mínimos (< 5% del volumen bruto).
+5. **Autonomía Periodística Multi-Agente**: Extracción, procesamiento y publicación de noticias en un ciclo desacoplado de 5 fases continuas sin intervención manual.
 
 ---
 
@@ -22,9 +23,9 @@
 | :--- | :--- | :--- |
 | **Framework Web** | Next.js (App Router, Server Components & Server Actions) | `^15.0.0` |
 | **Librería UI** | React / React DOM | `^19.0.0` |
-| **Lenguaje** | TypeScript | `^5.0.0` (Strict mode) |
+| **Lenguaje** | TypeScript / Python 3 | `TypeScript ^5.0.0`, `Python >=3.10` |
 | **Estilos y CSS** | TailwindCSS, `tailwindcss-animate`, `postcss`, `clsx`, `tailwind-merge` | `3.4.17` |
-| **Base de Datos & Backend** | Supabase (PostgreSQL, Row Level Security, RPCs, Storage, Auth) | `@supabase/supabase-js ^2.58.0` |
+| **Base de Datos & Backend** | Supabase (PostgreSQL, Row Level Security, PostgREST API, Storage, Auth) | `@supabase/supabase-js ^2.58.0` |
 | **Gestión de Estado Global** | Zustand con middleware de `devtools` | `^5.0.11` |
 | **Animaciones y Transiciones** | Framer Motion & GSAP | `framer-motion ^12.23.24`, `gsap ^3.14.2` |
 | **Componentes Accesibles** | Radix UI (`@radix-ui/react-dialog`, `slider`, `progress`, `toast`, `slot`) | Primitivos Headless |
@@ -35,6 +36,8 @@
 | **Feeds y Sindicalización** | RSS, XML manual | `rss ^1.2.2` |
 | **PWA & Offline** | Workbox, Service Workers | Generación en build |
 | **Herramientas de Audio CLI** | Node.js, `yt-dlp`, FFmpeg (loudnorm), Deno | Script `normalize-loudness.js` |
+| **IA & Reescritura** | GLM-4 (Zhipu AI), Google Gemini (1.5-flash), OpenAI (GPT-4o-mini) | Enfoque Free-First con Fallback Local |
+| **Hosting & DNS** | Vercel (Edge Network / Node.js 24) + Cloudflare (Proxy SSL/TLS Full) | Dominios: `saladillovivo.com.ar` y `www` |
 
 ---
 
@@ -42,7 +45,10 @@
 
 La aplicación corre sobre el **Next.js App Router** dentro del directorio `src/app`.
 
-### 3.1. Enrutamiento y Middleware Dinámico (`middleware.ts`)
+### 3.1. Enrutamiento y Middleware Dinámico (`src/middleware.ts`)
+> [!IMPORTANT]
+> El archivo `middleware.ts` debe residir estrictamente en `src/middleware.ts` para ser compatible con Next.js 15 y el empaquetador ESM en Node.js 24 en Vercel.
+
 El middleware intercepta las peticiones evaluando el `User-Agent` del cliente y el subdominio objetivo:
 - **Detección de Smart TV**: Agentes que contienen `TV|Large Screen|SmartTV|GoogleTV|AppleTV|HbbTV|CrKey|Tizen|WebOS`. Redirige a `https://tv.saladillovivo.com.ar`.
 - **Detección Móvil**: Agentes `Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini` (excluyendo TV). Redirige a `https://m.saladillovivo.com.ar`.
@@ -54,7 +60,6 @@ El middleware intercepta las peticiones evaluando el `User-Agent` del cliente y 
   - Página de inicio (SSR con ISR `revalidate = 60`).
   - Obtiene en paralelo: noticias de portada (`getArticlesForHome`), videos priorizados (`getVideosForHome`), textos para el zócalo (`getTickerTexts`), entrevistas, anuncios publicitarios activos (`getActiveAds`), banners (`getActiveBanners`) y eventos del calendario (`getCalendarEvents`).
   - **Deep Linking**: Si la URL contiene `?v={id}` o `?url={videoUrl}`, busca dicho video y lo inyecta como elemento de máxima prioridad para su reproducción inmediata.
-  - Entrega los datos al contenedor interactivo `ClientPageWrapper` / `ClientLayoutWrapper`.
 - **`/noticia/[slug]` (`src/app/noticia/[slug]/page.tsx`)**:
   - Vista individual de noticia (`revalidate = 60`).
   - `generateMetadata`: Extrae título, descripción e imagen OpenGraph (`1200x628`) para previsualizaciones sociales dinámicas (Twitter/X, Facebook, WhatsApp).
@@ -72,7 +77,6 @@ El middleware intercepta las peticiones evaluando el `User-Agent` del cliente y 
   - Verifica si una emisión en vivo está activa sin depender de la cuota de la YouTube Data API.
   - Para YouTube: Realiza un fetch con User-Agent emulado y escanea el contenido en busca de las señales `"isLive":true`, `"isLiveNow":true` o insignias de directo.
   - Para HLS (`.m3u8`): Comprueba que el archivo de lista de reproducción no contenga la etiqueta `#EXT-X-ENDLIST`.
-  - Headers `Cache-Control: no-store` para garantizar estado en tiempo real.
 - **`/api/revisar-noticias` (`src/app/api/revisar-noticias/route.ts`)**:
   - Tarea tipo Cron protegida por cabecera `Authorization: Bearer CRON_SECRET`.
   - Consulta en Supabase noticias listas para emitir (`is_published = false`, `publish_at <= now()`, con miniaturas generadas).
@@ -90,96 +94,47 @@ El middleware intercepta las peticiones evaluando el `User-Agent` del cliente y 
 
 ## 4. Estructura de la Base de Datos (Supabase / PostgreSQL)
 
-El proyecto almacena y consulta sus datos en Supabase con los siguientes esquemas de tablas y procedimientos almacenados (RPC).
+### 4.1. Esquema Completo de la Tabla `articles`
+La tabla `articles` es el núcleo editorial de la plataforma:
 
-### 4.1. Tablas del Sistema
+| Campo | Tipo PostgreSQL | Descripción |
+| :--- | :--- | :--- |
+| `id` | `bigint` (Identity / Serial) | Clave primaria autonumérica asignada por PostgreSQL. |
+| `title` | `text` | Título principal de la noticia (optimizado por IA o de la fuente). |
+| `text` | `text` | Cuerpo completo del artículo reestructurado en párrafos. |
+| `description` | `text` | Bajada o copete periodístico (resumen de 150-300 caracteres). |
+| `slug` | `text` (Unique) | Slug amigable para URL (ej: `continuan-a-buen-ritmo-las-obras...`). |
+| `image_url` | `text` | URL de la imagen principal del artículo. |
+| `thumbnail_url` | `text` | Imagen optimizada para vistas en tarjeta. |
+| `og_image_url` | `text` | Imagen horizontal proporción 1.91:1 (1200x628) para OpenGraph y Facebook. |
+| `miniatura_url` | `text` | Imagen vertical proporción 4:5 (1080x1350) para Instagram. |
+| `featureStatus` | `text` | Prioridad editorial: `'featured'` (destacada principal), `'secondary'` (secundaria), `'tertiary'` (terciaria), o `null`. |
+| `status` | `text` | Estado del pipeline: `'draft'` (borrador ingestado), `'ai_processed'` (enriquecido con IA), `'published'` (publicado). |
+| `is_published` | `boolean` | `false` durante ingesta y edición; `true` cuando está visible al público en la web. |
+| `published_at` | `timestamptz` | Fecha/hora oficial de publicación efectiva para ordenamiento cronológico. |
+| `publish_at` | `timestamptz` | Fecha/hora programada de difusión en redes sociales (Make.com). |
+| `created_at` | `timestamptz` | Fecha de creación del registro. |
+| `updatedAt` | `timestamptz` | Fecha de última modificación por IA o edición humana. |
+| `meta_title` | `text` | Título SEO optimizado para buscadores. |
+| `meta_description` | `text` | Meta descripción SEO (máximo 160 caracteres). |
+| `meta_keywords` | `text` | Lista de etiquetas separadas por coma (ej: `"Saladillo, Obras, Seguridad"`). |
+| `autor` | `text` | Firma de la nota (default: `'Equipo Editorial'`). |
+| `categoria` | `text` | Categoría temática (`'Local'`, `'Deportes'`, `'Cultura'`, etc.). |
+| `audio_url` | `text` (Nullable) | URL del archivo MP3/WAV con la locución radial de la noticia. |
+| `url_slide` | `text` (Nullable) | URL de archivo `.html` para emitir la noticia en el reproductor de video. |
+| `animation_duration` | `numeric` (Nullable) | Duración en segundos de la diapositiva en video. |
 
-#### 1. `articles` (Noticias y Contenido Editorial)
-Representa las noticias periodísticas publicadas en la portada y en redes.
-- `id` (`text` o `uuid`, Primary Key): Identificador único.
-- `title` / `titulo` (`text`): Título periodístico de la nota.
-- `slug` (`text`, Unique): Identificador amigable para URL (ej: `inauguracion-hospital-saladillovivo`).
-- `description` (`text`): Bajada o copete de la noticia.
-- `text` / `contenido` (`text`): Contenido completo de la noticia (puede incluir marcado HTML o texto plano).
-- `image_url` / `imageUrl` (`text`): URL de la imagen principal de la nota.
-- `featureStatus` (`text`, Nullable): Jerarquía editorial en la portada (`featured` = destacada principal, `secondary` = secundaria, `tertiary` = terciaria, o `null` = noticia estándar).
-- `created_at` (`timestamp with time zone`): Fecha de creación del registro.
-- `updatedAt` / `updated_at` (`timestamp with time zone`): Fecha de última modificación.
-- `published_at` / `publish_at` (`timestamp with time zone`, Nullable): Fecha y hora programada de publicación.
-- `is_published` (`boolean`, Default `false`): Bandera para indicar si ya fue difundida en redes sociales.
-- `miniatura_url` (`text`, Nullable): Imagen en formato vertical 4:5 (1080x1350 px) optimizada para feed de Instagram.
-- `og_image_url` (`text`, Nullable): Imagen en formato horizontal 1.91:1 (1200x628 px) para OpenGraph / Facebook.
-- `audio_url` (`text`, Nullable): URL del archivo de audio con la locución o crónica radial de la noticia.
-- `url_slide` (`text`, Nullable): URL a un archivo `.html` con diapositiva interactiva para ser reproducida en el reproductor de video.
-- `animation_duration` (`numeric`, Nullable): Duración en segundos de la animación del slide interactivo.
-- `meta_title`, `meta_description`, `meta_keywords` (`text`, Nullable): Campos para optimización en motores de búsqueda (SEO).
-- `autor` (`text`, Default `'Equipo Editorial'`): Firma del periodista o redacción.
-- `categoria` (`text`, Nullable): Rubro de la noticia (Sociedad, Política, Policiales, Cultura, Deportes, etc.).
-
-#### 2. `videos` (Repositorio Audiovisual)
-Almacena el catálogo de videos que alimentan la emisión continua y los carruseles temáticos.
-- `id` (`bigint` o `text`, Primary Key): Identificador del video.
-- `nombre` / `title` (`text`): Título descriptivo del video.
-- `url` (`text`): URL del video (enlaces de YouTube, archivos MP4, HLS).
-- `createdAt` (`timestamp with time zone`): Fecha de alta del video.
-- `categoria` (`text`): Categoría asignada (ej: `SEMBRANDO FUTURO`, `FIERROS`, `HCD DE SALADILLO - Período 2025`, `clips`, `cortos`, `export`, etc.).
-- `imagen` (`text`): URL de la miniatura o poster del video.
-- `novedad` (`boolean`, Default `false`): Marca el video como contenido reciente (Tier 2).
-- `forzar_video` (`boolean`, Default `false`): Fuerza que el video sea seleccionado obligatoriamente en la emisión inicial (Tier 1).
-- `volumen_extra` (`numeric`, Default `1.0`): Multiplicador de audio normalizado (calculado vía LUFS con `normalize-loudness.js`) para equilibrar el volumen relativo de videos con audio bajo.
-- `duration` (`numeric`, Nullable): Duración en segundos.
-
-#### 3. `entrevistas` (Contenido de Mano a Mano y Testimonios)
-- `id` (`text` / `uuid`, Primary Key).
-- `nombre` (`text`): Título de la entrevista o entrevistado.
-- `url` (`text`): Enlace al video de la entrevista.
-- `imagen` (`text`): Miniatura de la entrevista.
-- `categoria` (`text`): Rubro temático.
-- `created_at`, `updated_at` (`timestamp with time zone`).
-
-#### 4. `banner` & `anuncios` (Sistema Publicitario y Auspiciantes)
-- **`banner`**:
-  - `id` (`text` / `uuid`, Primary Key).
-  - `imageUrl` (`text`): Gráfica del banner.
-  - `nombre` (`text`): Nombre del auspiciante.
-  - `isActive` (`boolean`): Estado de activación.
-  - `createdAt` (`timestamp with time zone`).
-- **`anuncios`**:
-  - `id` (`text` / `uuid`, Primary Key).
-  - `image_url` (`text`): Imagen del anuncio.
-  - `title` (`text`): Título de la campaña.
-  - `link_url` (`text`, Nullable): Destino del hipervínculo en caso de clic.
-  - `is_active` (`boolean`): Interruptor de visibilidad comercial.
-  - `created_at` (`timestamp with time zone`).
-
-#### 5. `textos_ticker` (Zócalo de Noticias y Avisos en Pantalla)
-- `id` (`text` / `uuid`, Primary Key).
-- `text` (`text`): Texto del mensaje a desplegar en el cintillo inferior.
-- `isActive` (`boolean`, Default `true`): Visibilidad del texto en rotación.
-- `createdAt` (`timestamp with time zone`).
-
-#### 6. `eventos` (Agenda Cultural y Comunitaria)
-- `id` (`text` / `uuid`, Primary Key).
-- `nombre` (`text`): Denominación del evento o festividad.
-- `fecha` (`date` o `text`): Fecha del evento.
-- `hora` (`text`): Horario de inicio.
-
----
-
-### 4.2. Procedimientos Almacenados en PostgreSQL (RPCs)
-
-Para optimizar al máximo la transferencia de datos y evitar que el cliente descargue cientos de registros por cada usuario, se implementaron funciones PostgreSQL en Supabase:
-
-1. **`get_videos_prioritized(p_limit int)`**:
-   - Devuelve los videos ordenados por capas jerárquicas:
-     - **Tier 1**: Videos con `forzar_video = true`.
-     - **Tier 2**: Videos marcados con `novedad = true`.
-     - **Tier 3**: Videos aleatorios (`ORDER BY RANDOM()`).
-   - Excluye categorías institucionales que no deben sonar en rotación común (como sesiones completas del `HCD de Saladillo`).
-2. **`get_videos_by_category(p_category text, p_limit int)`**:
-   - Permite cargar bajo demanda los videos de una categoría específica utilizando operadores `ILIKE` para emparejar etiquetas y variaciones de texto.
-3. **`get_random_video_excluding_sv()`**:
-   - Retorna un video al azar para alimentar la cola de reproducción automática cuando el video actual finaliza, garantizando variedad musical y cultural.
+### 4.2. Consulta de Portada (`getArticlesForHome` en `src/lib/data.ts`)
+Para optimizar el ancho de banda y la velocidad de carga de la portada, la consulta en Next.js excluye el campo pesado `text`:
+```sql
+SELECT id, title, image_url, featureStatus, updatedAt, created_at, slug, description,
+       meta_title, meta_description, meta_keywords, published_at, audio_url, url_slide, animation_duration
+FROM articles
+WHERE (published_at IS NULL OR published_at <= NOW())
+  AND created_at >= (NOW() - INTERVAL '48 HOURS')
+ORDER BY created_at DESC
+LIMIT 25;
+```
 
 ---
 
@@ -210,123 +165,182 @@ Las noticias pueden ser emitidas como piezas televisivas animadas:
 4. Si la noticia posee `audio_url`, se reproduce en paralelo con un elemento `<audio>` sincronizado.
 5. Al completarse la duración del slide o terminar el audio, el reproductor de video de fondo se reactiva de forma transparente (`resumeAfterSlide`).
 
-### 5.4. Normalización de Volumen (LUFS & `volumen_extra`)
-Debido a que los videos de YouTube poseen niveles dispares de sonoridad, el sistema cuenta con el campo `volumen_extra`:
-- `1.0`: Ganancia nativa estándar.
-- `> 1.0` (ej: `1.8`): Impulso para videos con mezcla de sonido baja.
-- El script de mantenimiento `scripts/normalize-loudness.js` toma una categoría de referencia (`SEMBRANDO FUTURO`), extrae el audio con `yt-dlp` + Deno y mide el volumen integrado en LUFS mediante el filtro `loudnorm` de FFmpeg, persistiendo el multiplicador resultante en Supabase.
-- En el cliente, `useVolumeStore` y `VideoPlayer.tsx` computan el volumen objetivo:  
-  `TargetVolume = Math.min(1.0, GlobalVolume * (volumen_extra || 1.0))`.
-
 ---
 
-## 6. Módulos y Secciones de la Plataforma
+## 6. Sistema de Automatización de Noticias Multi-Agente (Arquitectura de 5 Pasos)
 
-### 6.1. Cabecera y Navegación (`Header.tsx`)
-- Logo de Saladillo Vivo y estado en tiempo real.
-- Barra de búsqueda interactiva conectada a `useNewsStore`.
-- Selector de modo: Modo Diario (Portal web tradicional) vs. Modo TV (pantalla limpia para smart TVs o proyectores).
-- Control global de volumen y silenciado rápido (Mute/Unmute).
+La plataforma dispone de un motor autónomo desarrollado en Python (`agents/` y scripts raíz) que ejecuta de forma desacoplada y secuencial el ciclo completo de noticias:
 
-### 6.2. Sección Central de Video (`VideoSection.tsx`)
-- Contenedor principal del reproductor de video con relación de aspecto cinematográfica.
-- Integra las barras cinemáticas, el zócalo de noticias (`NewsTicker`), el widget meteorológico superpuesto (`WeatherOverlay`), y la capa `AntiGravityLayer`.
-- Manejo de pantalla completa con la API estándar de Fullscreen del navegador.
+```mermaid
+flowchart TD
+    A["Paso 1: ScraperAgent<br/>(ABC, Ahora, InfoSaladillo)"] -->|Artículos Crudos| B["Paso 2: StorageAgent<br/>(Guardar Borrador en BD)"]
+    B -->|ID asignado en Supabase| C["Paso 3: AiRewriterAgent<br/>(Reescritura IA Free-First)"]
+    C -->|Títulos y Textos Optimizados| D["Paso 4: StorageAgent<br/>(Actualizar BD con IA)"]
+    D -->|Registro Enriquecido| E["Paso 5: PublisherAgent<br/>(Publicación Oficial is_published=True)"]
+    E --> F["🌐 Portada Saladillo Vivo<br/>(Next.js 15)"]
+    E --> G["📱 Make.com Webhook<br/>(Instagram 4:5 / Facebook 1.91:1)"]
+```
 
-### 6.3. Carrusel Dinámico y Categorías de Video (`CategoryCycler.tsx` / `ExclusiveVideoCarousel.tsx`)
-Muestra el catálogo segmentado por programas y secciones temáticas:
-- **`Sembrando Futuro`**: Producción agropecuaria, emprendimientos y desarrollo local.
-- **`Gente de Acá`**: Historias de vida de habitantes y personajes destacados de Saladillo.
-- **`Fierros de Saladillo`**: Automovilismo, talleres, karting y mecánica tradicional.
-- **`ITEC "Augusto Cicaré"`**: Educación técnica e innovaciones del Instituto Tecnológico Cicaré.
-- **`Saladillo Canta`**: Festivales musicales, recitales y folklore.
-- **`Hacelo Corto`**: Cortometrajes y piezas audiovisuales breves.
-- **`De Otros Tiempos`**: Archivo histórico y memorias de la ciudad.
-- **`HCD de Saladillo`**: Sesiones del Honorable Concejo Deliberante (disponible en selección a demanda, excluida de la rotación aleatoria).
-- **Mecanismo de Aleatoriedad Extrema (Fisher-Yates Shuffle)**: Al alternar entre categorías con las flechas o iniciar la app, se genera un nuevo `shuffleNonce` para que el orden de videos sea siempre impredecible y fresco.
+### 6.1. Agente 1: `ScraperAgent` (`agents/scraper_agent.py`)
+- **Portales Monitoreados**:
+  - **ABC Saladillo**: `https://www.abcsaladillo.com.ar`
+  - **Ahora Saladillo**: `https://ahorasaladillo-diariodigital.com.ar`
+  - **InfoSaladillo**: `https://infosaladillo.com.ar`
+- **Técnicas Anti-Bloqueo**:
+  - Rotación pseudo-aleatoria de User-Agents modernos (Chrome 122, Edge 121, Safari macOS).
+  - Delays de cortesía entre peticiones HTTP (1.0 a 2.5 segundos) para no saturar los servidores de origen.
+  - Filtrado de exclusiones para descartar enlaces no periodísticos (`/farmacias-de-turno`, `/contacto`, `/tag/`, redes sociales).
+- **Extracción de Contenido**:
+  - Parser HTML nativo basado en `html.parser` y expresiones regulares.
+  - Extrae: título limpio, cuerpo de párrafos concatenados, imagen destacada (`og:image` o primera imagen de nota), fecha y URL canónica.
+  - Genera hash MD5 de la URL canónica para deduplicación local en `data/scraped_articles.json`.
 
-### 6.4. Parrilla de Noticias (`NewsAndMostWatched.tsx`, `NewsColumn.tsx`, `MoreNewsGrid.tsx`)
-- **Noticia Destacada (`featured`)**: Tarjeta principal con titular de alto impacto, bajada e imagen.
-- **Noticias Secundarias y Terciarias**: Diseño en cuadrícula modular con tarjetas `NewsCard`.
-- **Reproductor de Noticia en Video**: Botón "Play" directo sobre las tarjetas que transmuta el slide de la noticia al reproductor de video principal.
-- **Modal de Detalle (`NewsDetailModal.tsx`)**: Lectura rápida en ventana modal sin abandonar la página de inicio.
+### 6.2. Agente 2: Ingesta en Base de Datos como Borrador (`StorageAgent.save_draft`)
+- Toma el artículo extraído y lo registra inmediatamente en la tabla `articles` de Supabase:
+  - `status`: `'draft'`
+  - `is_published`: `false`
+  - `title`: Título original de la fuente.
+  - `text`: Texto original de la fuente.
+  - `description`: Bajada preliminar.
+  - `slug`: Slug generado algorítmicamente asegurando no colisión.
+  - `image_url`, `thumbnail_url`, `og_image_url`: Imagen original.
+  - `created_at`: Fecha y hora actual.
+- **Deduplicación de Slugs**:
+  - Función `generate_unique_slug(title)`: Consulta en Supabase con PostgREST `slug=eq.{slug}&limit=1`.
+  - Si colisiona, añade sufijos incrementales (`-1`, `-2`, etc.) hasta encontrar un slug libre.
+- **Manejo de Esquema**:
+  - Si alguna columna no existe en el PostgREST Schema Cache (código HTTP 400), la función detecta el nombre de la columna y reintenta automáticamente descartando dicho campo sin interrumpir el flujo.
+- **Captura de ID**: Recupera y retorna el `id` autonumérico generado por PostgreSQL para vincularlo a las fases siguientes.
 
-### 6.5. Modo TV Dedicado (`TvModeLayout.tsx` & componentes `src/components/tv/`)
-- Interfaz adaptada para pantallas grandes y Smart TVs (1080p / 4K).
-- Desaparición de controles por inactividad: Si no se detecta movimiento de mouse o pulsaciones de teclado durante 1 segundo, la interfaz se oculta por completo, dejando únicamente el streaming.
-- **Riel de Contenido TV (`TvContentRail.tsx`)**: Carrusel inferior semi-transparente optimizado para navegación con control remoto.
-- **Widget del Clima en Pantalla (`WeatherOverlay.tsx`)**: Indicador de temperatura, humedad, viento y estado meteorológico de Saladillo provisto por el hook `useWeather`.
+### 6.3. Agente 3: Reestructuración y Modificación con IA (`AiRewriterAgent`)
+- Aplica el enfoque **Free-First** (máxima calidad y coste cero garantizado):
+  1. **GLM-4 (Zhipu AI / Z.AI)**: Proveedor primario, alta cuota gratuita permanente y rápida respuesta en español.
+  2. **Google Gemini (gemini-1.5-flash)**: Proveedor secundario, veloz y gratuito.
+  3. **OpenAI (gpt-4o-mini)**: Proveedor terciario comercial de respaldo.
+  4. **Fallback Heurístico Periodístico Local**: Mecanismo de emergencia local que garantiza continuidad operativa si fallan las redes o se agotan las cuotas. Reestructura el texto bajo normas periodísticas (Lead + Desarrollo + Cierre), genera metadatos y añade prefijos hiperlocales (`"Saladillo: ..."`).
+- **Prompt Hiperlocal Especializado**:
+  - Reestructura la noticia sin alterar hechos, nombres, fechas ni cifras.
+  - Genera título periodístico digital atractivo.
+  - Produce un copete/lead informativo de 150-300 caracteres.
+  - Formula meta descripción SEO (máximo 155 caracteres) y etiquetas locales (`palabras_clave`).
+- **Scoring Editorial Automático (`calculate_priority_score`)**:
+  - Relevancia hiperlocal ("Saladillo", obras, comunidad): +2 puntos.
+  - Palabras de alto impacto ("inversión", "alerta", "inauguración", "oro", "campeón"): +2 puntos.
+  - Presencia de imagen válida: +1 punto.
+  - Extensión mayor a 400 caracteres: +1 punto.
+  - **Clasificación**: `score >= 5` → `'featured'`, `score >= 3` → `'secondary'`, `score < 3` → `'tertiary'`.
 
-### 6.6. Banners Comerciales y Eventos (`AdsSection.tsx`, `BannerCarousel.tsx`)
-- Rotación automática de banners institucionales y comerciales con enlaces directos a anunciantes.
-- Agenda de eventos comunitarios, culturales y deportivos sincronizados con la tabla `eventos`.
+### 6.4. Agente 4: Actualización en Base de Datos con IA (`StorageAgent.update_with_ai`)
+- Ejecuta un `PATCH` sobre la API REST de Supabase filtrando por `id=eq.{article_id}`.
+- Actualiza:
+  - `title`: Título optimizado por IA.
+  - `text`: Cuerpo reestructurado profesionalmente.
+  - `description`: Copete editorial.
+  - `meta_title`, `meta_description`: Metadatos SEO.
+  - `meta_keywords`: Etiquetas en formato texto.
+  - `featureStatus`: Prioridad calculada.
+  - `status`: `'ai_processed'`.
+  - `updatedAt`: Timestamp ISO actual.
 
----
+### 6.5. Agente 5: Publicación Oficial y Distribución (`PublisherAgent`)
+- Activa la visibilidad pública de la noticia:
+  - `is_published`: `true`
+  - `status`: `'published'`
+  - `published_at`: Timestamp ISO actual.
+  - `publish_at`: Timestamp ISO actual.
+  - `miniatura_url` y `og_image_url`: Sincronizadas para previsualizaciones sociales.
+- Con esta actualización:
+  - Next.js 15 (`getArticlesForHome` con ISR 60s) indexa y renderiza la noticia de inmediato en la portada.
+  - Los feeds RSS (`/rss.xml` y `/feed/miniaturas`) incorporan la noticia para los lectores y plataformas de agregación.
 
-## 7. Estado Global de la Aplicación (Zustand Stores)
+### 6.6. Orquestador y Planificación Horaria (`OrchestratorAgent`)
+El orquestador (`complete_automation.py`) administra la frecuencia de ejecución según la franja horaria local de Argentina:
 
-Toda la reactividad del sistema está organizada en almacenes especializados en `src/store/`:
-
-1. **`usePlayerStore`** (`src/store/usePlayerStore.ts`):
-   - Controla el video en reproducción (`currentVideo`), video precargado (`nextVideo`), estado de reproducción (`isPlaying`), modo de vista (`diario` | `tv`).
-   - Gestiona la superposición de intros (`isPreRollOverlayActive`, `overlayIntroVideo`).
-   - Mantiene los estados de mutex (`activeContentId`) para prevenir que múltiples instancias de video reproduzcan simultáneamente.
-   - Maneja la cola de reproducción aleatoria (`handleOnEnded`, `playNextVideoInQueue`, `playSpecificVideo`).
-   - Pausa y reanudación por slides interactivos (`pauseForSlide`, `resumeAfterSlide`).
-2. **`useNewsPlayerStore`** (`src/store/useNewsPlayerStore.ts`):
-   - Controla las diapositivas interactivas (`currentSlide`: html, imagen o video).
-   - Flag `isNewsIntroActive` para animar la transición visual de entrada y salida del slide de noticias.
-   - Emite el audio locutado de la noticia.
-3. **`useVolumeStore`** (`src/store/useVolumeStore.ts`):
-   - Almacena el nivel global de volumen (`volume`: float entre 0 y 1).
-   - Estado de silencio (`isMuted`).
-   - Métodos `setVolume(v)`, `toggleMute()`, `unmute()`.
-4. **`useNewsStore`** (`src/store/useNewsStore.ts`):
-   - Maneja la barra de búsqueda general de noticias y videos.
-   - Término de búsqueda, resultados filtrados, estado de carga (`searchLoading`) y apertura del buscador.
-5. **`useWeatherUIStore`** (`src/store/useWeatherUIStore.ts`):
-   - Estado de visualización y capas del módulo del clima.
-6. **`useShieldModeStore`** (`src/store/useShieldModeStore.ts`):
-   - Controla el modo blindado anti-branding y la visibilidad de barras negras cinemáticas.
-
----
-
-## 8. Mapeo de Categorías de Video (`src/lib/categoryMappings.ts`)
-
-Para mapear los nombres de la base de datos con los nombres visibles al público se utiliza la siguiente tabla de traducción:
-
-| Etiqueta Visible (`display`) | Valor en Base de Datos (`dbCategory`) | Notas |
+| Franja Horaria | Intervalo de Ejecución | Justificación Editorial |
 | :--- | :--- | :--- |
-| **Novedades** | `__NOVEDADES__` | Filtrada y excluida de la navegación circular común |
-| **HCD de Saladillo** | `'HCD DE SALADILLO - Período 2025'` | Oculta de rotación aleatoria por ser sesiones formales |
-| **ITEC ¨Augusto Cicaré¨** | `['ITEC ¨AUGUSTO CICARE¨ SALADILLO', 'iteccicare', 'itec']` | Agrupa todas las variantes del instituto tecnológico |
-| **Fierros de Saladillo** | `'FIERROS'` | Deporte motor y automovilismo |
-| **Gente de Acá** | `'export'` | Entrevistas y perfiles biográficos |
-| **Sembrando Futuro** | `'SEMBRANDO FUTURO'` | Agro, industria y economía rural |
-| **De Otros Tiempos** | `['ARCHIVO SALADILLO VIVO', 'historia']` | Videos y fotos históricas digitalizadas |
-| **Saladillo Canta** | `'clips'` | Música local y actuaciones en vivo |
-| **Hacelo Corto** | `['cortos', 'Hacelo Corto']` | Producciones audiovisuales cortas |
+| **07:00 a 12:00** | **Cada 30 minutos** | Horas pico matutinas con mayor flujo de novedades locales, apertura de oficinas y coberturas en vivo. |
+| **12:00 a 22:00** | **Cada 1 hora** | Ritmo periodístico vespertino estándar. |
+| **22:00 a 07:00** | **Cada 3 horas** | Guardia nocturna pasiva para registrar eventos de última hora minimizando consumo de recursos. |
 
 ---
 
-## 9. Guía para Futuras Ampliaciones y Reglas para Prompts de IA
+## 7. Infraestructura de Producción, Despliegue y Dominios
 
-Cuando se redacten prompts para otra IA o se desarrollen nuevos módulos en este proyecto, se **deben** acatar las siguientes directivas técnicas:
+### 7.1. Configuración de Vercel
+- **Proyecto**: `autosaladillovivo`
+- **Equipo**: `matias11972-saladillovivo` (`team_ct9TOpkXChXF9w5E0nVWQiAN`)
+- **Preset de Framework**: `nextjs` (Obligatorio para enrutamiento perimetral correcto en Next.js 15).
+- **Protección de Despliegues (SSO)**: `ssoProtection: null` (Desactivada para permitir acceso público universal sin login previo a Vercel).
+- **Runtime**: Node.js 24.x con soporte de Serverless Functions en región `iad1` (Washington D.C., USA).
+- **Variables de Entorno Clave en Producción**:
+  - `NEXT_PUBLIC_SUPABASE_URL`: `https://otwvfihzaznyjvjtkvvd.supabase.co`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Llave pública para lecturas en frontend.
+  - `SUPABASE_KEY` / `SUPABASE_SERVICE_ROLE_KEY`: Llave de servicio para inserción y actualización por parte de los scripts y tareas programadas.
+  - `CRON_SECRET`: Secreto criptográfico para autorizar el endpoint `/api/revisar-noticias`.
+  - `MAKE_WEBHOOK_URL`: URL del escenario de Make.com para publicación en redes.
 
-### ⚠️ Reglas Inviolables ("Reglas de Oro")
-1. **Nunca exponer los controles o marcas de YouTube**: Todo reproductor embebido de YouTube debe conservar las banderas `modestbranding=1`, `controls=0`, `rel=0` y mantenerse detrás de las capas de protección visual (`Cinematic Bars` y `AntiGravityLayer`).
-2. **Respetar la Persistencia de Nodos (Node Persistence)**: No colocar atributos `key={video.id}` sobre los contenedores principales de video que obliguen a React a destruir y recrear el elemento `<video>` o iframe del DOM. Los cambios de video deben ocurrir reutilizando el nodo montado.
-3. **No realizar consultas abiertas `SELECT *` sobre tablas de video o artículos**:
-   - En la home, utilizar siempre la RPC `get_videos_prioritized` o consultas acotadas con `limit(20)`.
-   - Excluir el campo de texto pesado `text` en listas y carruseles (descargar solo `id, title, slug, image_url, description`).
-4. **Respetar el Mutex de Audio**:
-   - Cuando entra un slide interactivo o una noticia con audio (`useNewsPlayerStore`), el reproductor de video de fondo debe ser pausado (`pauseForSlide`) o silenciado de forma estricta.
-   - Al terminar el slide, restaurar la reproducción desde el segundo guardado (`savedProgress`) mediante `resumeAfterSlide`.
-5. **No eliminar la exclusión de HCD en queries aleatorias**: La categoría `HCD de Saladillo` sólo debe ser accesible por click explícito del usuario en su carrusel, jamás debe insertarse automáticamente en la reproducción de entretenimiento general.
-6. **Manejo de Hidratación en Next.js**: Componentes que lean variables de ventana (`window`, `localStorage`, `document.fullscreenElement`) deben implementar banderas de montaje (`isMounted`) o ser cargados dinámicamente con `dynamic(() => import(...), { ssr: false })` para evitar errores de hidratación entre servidor y cliente.
+### 7.2. Configuración de Cloudflare y DNS
+El dominio `saladillovivo.com.ar` opera detrás del proxy de Cloudflare (DNS proxied, nube naranja):
+- **Modo SSL/TLS en Cloudflare**: Debe estar configurado en **"Full" o "Full (strict)"**. No utilizar "Flexible", ya que Vercel rechaza peticiones HTTP sin TLS en el puerto 80 devolviendo `404 NOT_FOUND` o `421 Misdirected Request`.
+- **Ruteo de Nombres de Dominio**:
+  - `saladillovivo.com.ar` (Apex): Redirige permanentemente (`308 Permanent Redirect`) hacia `www.saladillovivo.com.ar`.
+  - `www.saladillovivo.com.ar` (Canónico): Registro CNAME hacia `cname.vercel-dns.com` o `a7ab0739941b2daa.vercel-dns-017.com`.
+  - `autosaladillovivo.vercel.app`: Dominio nativo de Vercel para pruebas directas.
 
-### 💡 Casos Típicos de Futuras Ampliaciones
-- **Transmisiones en Vivo Planificadas**: Integración de un contador regresivo que consulte `/api/check-stream` y tome automáticamente el control del reproductor principal cuando comience una transmisión oficial en vivo.
-- **Panel de Administración (Backoffice)**: Interfaz protegida para subir noticias, asignar tags de `featureStatus`, programar horarios de publicación (`publish_at`) y gestionar el zócalo de noticias sin necesidad de acceder a la consola de Supabase.
-- **Módulo de Notificaciones Web Push**: Utilizar la infraestructura de Service Worker (`sw.js`) para alertar sobre noticias de última hora o eventos en vivo.
-- **Mejoras del Widget de Clima**: Ampliación con alertas meteorológicas tempranas del SMN (Servicio Meteorológico Nacional).
+---
+
+## 8. Guía Operativa y Comandos del Sistema de Automatización
+
+### 8.1. Ejecutar el Ciclo Completo de 5 Pasos
+Para ejecutar una sola pasada de extracción, borrador en BD, IA, actualización en BD y publicación:
+```bash
+python complete_automation.py --once
+```
+
+Para mantener el sistema corriendo continuamente en segundo plano con el planificador por franjas horarias:
+```bash
+python complete_automation.py
+```
+
+### 8.2. Ejecutar Módulos Aislados
+- **Scraping Directo únicamente**:
+  ```bash
+  python simple_scraper.py --limit 10
+  ```
+- **Reescritura IA únicamente sobre artículos en `data/scraped_articles.json`**:
+  ```bash
+  python free_rewriter.py
+  ```
+- **Publicación directa a Supabase desde archivo local**:
+  ```bash
+  python publish_to_supabase.py --input data/modified_articles.json
+  ```
+- **Verificar conectividad con Supabase**:
+  ```bash
+  python publish_to_supabase.py --check-only
+  ```
+
+### 8.3. Monitoreo y Auditoría
+- **Logs detallados del sistema**: [`logs/automation.log`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/logs/automation.log)
+- **Métricas del último ciclo**: [`data/cycle_summary.json`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/data/cycle_summary.json)
+- **Historial de artículos scrapeados**: [`data/scraped_articles.json`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/data/scraped_articles.json)
+- **Historial de artículos con IA**: [`data/modified_articles.json`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/data/modified_articles.json)
+
+---
+
+## 9. Reglas Inviolables para Agentes de IA y Desarrolladores
+
+Cuando un modelo de IA o un desarrollador modifique el sistema, debe acatar estrictamente estas directivas:
+
+1. **NO alterar la arquitectura de video "TV-Grade"**:
+   - Nunca modificar los archivos [`VideoPlayer.tsx`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/src/components/VideoPlayer.tsx), [`VideoSection.tsx`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/src/components/VideoSection.tsx), [`usePlayerStore.ts`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/src/store/usePlayerStore.ts) ni [`useVolumeStore.ts`](file:///d:/GEMINI-CLI/SALADILLOVIVO_NEXT/saladillo-vivo-pro/src/store/useVolumeStore.ts).
+   - Mantener intacto el sistema de transiciones Zero-Black con *Safety Delay* y las capas de blindaje *Cinematic Shield*.
+2. **Respetar la secuencia de 5 pasos en noticias**:
+   - Todo artículo debe pasar primero por un estado de borrador preliminar en base de datos (`status='draft'`, `is_published=false`) antes de ser enriquecido por IA y finalmente publicado.
+3. **Mantener la compatibilidad Free-First**:
+   - Toda llamada de IA debe priorizar modelos gratuitos (GLM / Gemini) antes de invocar APIs de pago, y siempre debe existir un fallback local algorítmico funcional que no bloquee el pipeline ante cortes de API externa.
+4. **Respetar el esquema de PostgREST y la deduplicación de slugs**:
+   - Todo nuevo registro debe verificar colisión previa de slugs.
+   - En la consulta de portada en Next.js, nunca solicitar el campo pesado `text` para no degradar el First Contentful Paint (FCP).
+5. **Garantizar compatibilidad con Node.js 24 en Vercel**:
+   - El middleware debe conservarse en `src/middleware.ts` y usar únicamente módulos compatibles con el Edge Runtime o Node.js ESM.
