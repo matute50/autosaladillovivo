@@ -1,0 +1,83 @@
+{
+  "status": "success",
+  "published_count": 12,
+  "failed_count": 0,
+  "failed_articles": [],
+  "published_items": [
+    {
+      "id": 396,
+      "title": "Juegos Bonaerenses 2026 | Otro oro para Saladillo de la mano de la dupla Benjamín y Gustavo Antonelli en Truco Intergeneracional",
+      "slug": "juegos-bonaerenses-2026-otro-oro-para-saladillo-de-la-mano-de-la-dupla-benjamin-y-gustavo-antonelli",
+      "timestamp": "2026-10-22T22:27:45.201091"
+    },
+    {
+      "id": 397,
+      "title": "Juegos Bonaerenses 2026",
+      "slug": "juegos-bonaerenses-2026-saladillo-sumo-otras-3-medallas-y-ya-acumula-6-en-su-haber",
+      "timestamp": "2026-10-22T22:27:46.710460"
+    },
+    {
+      "id": 398,
+      "title": "Panorama meteorológico - PBA - 22/10/26",
+      "slug": "panorama-meteorologico-pba-22-10-26",
+      "timestamp": "2026-10-22T22:27:48.209666"
+    },
+    {
+      "id": 399,
+      "title": "150º Aniversario de la Sociedad Española de Socorros Mutuos de Saladillo",
+      "slug": "150o-aniversario-de-la-sociedad-espanola-de-socorros-mutuos-de-saladillo",
+      "timestamp": "2026-10-22T22:27:49.950612"
+    },
+    {
+      "id": 400,
+      "title": "Agradecimiento de Batucada La Diferente, tras el 8° Encuentro Nacional en Saladillo",
+      "slug": "agradecimiento-de-batucada-la-diferente-tras-el-8-encuentro-nacional-en-saladillo",
+      "timestamp": "2026-10-22T22:27:51.702158"
+    },
+    {
+      "id": 401,
+      "title": "Información municipal",
+      "slug": "informacion-municipal-56",
+      "timestamp": "2026-10-22T22:27:53.240243"
+    },
+    {
+      "id": 402,
+      "title": "Continúan a buen ritmo las obras de construcción de las viviendas destinadas al personal policial",
+      "slug": "continuan-a-buen-ritmo-las-obras-de-construccion-de-las-viviendas-destinadas-al-personal-policial",
+      "timestamp": "2026-10-22T22:27:54.802206"
+    },
+    {
+      "id": 403,
+      "title": "Resumen segunda jornada de la Delegación de Saladillo en Mar del Plata",
+      "slug": "resumen-segunda-jornada-de-la-delegacion-de-saladillo-en-mar-del-plata",
+      "timestamp": "2026-10-22T22:27:56.378222"
+    },
+    {
+      "id": 404,
+      "title": "Asamblea de socios",
+      "slug": "asamblea-de-socios-la-cooperativa-electrica-de-saladillo-reafirma-su-crecimiento",
+      "timestamp": "2026-10-22T22:27:57.901875"
+    },
+    {
+      "id": 405,
+      "title": "El Club Social y Deportivo La Lola convoca para el reempadronamiento de socios",
+      "slug": "el-club-social-y-deportivo-la-lola-convoca-para-reempadronamiento-de-socios",
+      "timestamp": "2026-10-22T22:27:59.417828"
+    },
+    {
+      "id": 406,
+      "title": "La CES reafirma su crecimiento: inversión superior a los 2.000 millones de pesos en infraestructura",
+      "slug": "la-ces-reafirma-su-crecimiento-inversion-superior-a-los-2-000-millones-de-pesos-en-infraestructura",
+      "timestamp": "2026-10-22T22:28:00.911090"
+    },
+    {
+      "id": 407,
+      "title": "JJBB - Jornada 3 para Saladillo: Oro en truco intergeneración, tejo femenino y video minuto / Plata y bronce en taekwondo",
+      "slug": "jjbb-jornada-3-para-saladillo-oro-en-truco-intergeneracion-tejo-femenino-y-video-minuto-plata-y-bron",
+      "timestamp": "2026-10-22T22:28:02.413329"
+    }
+  ],
+  "timestamp": "2026-10-22T22:28:03.213651",
+  "total_articles": 12,
+  "source_file": "D:\\GEMINI-CLI\\SALADILLOVIVO_NEXT\\saladillo-vivo-pro\\data\\modified_articles.json"
+}

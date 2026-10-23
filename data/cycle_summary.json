@@ -1,0 +1,13 @@
+{
+  "execution_id": 1,
+  "status": "completed",
+  "start_time": "2026-10-22T22:27:17.069966",
+  "end_time": "2026-10-22T22:28:03.258254",
+  "duration_seconds": 46.19,
+  "scraping_count": 12,
+  "ia_modified_count": 12,
+  "published_count": 12,
+  "failed_count": 0,
+  "success_rate_percent": 100.0,
+  "timestamp": "2026-10-22T22:28:03.258285"
+}
