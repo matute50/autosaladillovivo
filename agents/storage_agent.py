@@ -194,7 +194,7 @@ class StorageAgent:
     # --------------------------------------------------------------------------
     # PASO 5: OTRA VEZ GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA Y AUDIO)
     # --------------------------------------------------------------------------
-    def update_with_ai(self, article_id, ai_data, audio_url=None, slide_url=None):
+    def update_with_ai(self, article_id, ai_data=None, audio_url=None, slide_url=None):
         """
         Actualiza el registro existente en Supabase con los datos reestructurados por la IA,
         la URL de audio y la URL del slide interactivo si fueron generados.
@@ -205,27 +205,35 @@ class StorageAgent:
             return None
 
         now_iso = datetime.now().isoformat()
-        title = ai_data.get('titulo_ia') or ai_data.get('title')
-        content = ai_data.get('contenido_ia') or ai_data.get('text')
-        description = ai_data.get('meta_description') or ai_data.get('description')
-        feature_status = ai_data.get('featureStatus') or 'secondary'
-        final_audio_url = audio_url or ai_data.get('audio_url')
-        final_slide_url = slide_url or ai_data.get('url_slide') or ai_data.get('slide_url')
-
-        raw_keywords = ai_data.get('meta_keywords') or ai_data.get('palabras_clave') or []
-        keywords_str = ', '.join(raw_keywords) if isinstance(raw_keywords, list) else str(raw_keywords)
-
         patch_payload = {
-            'title': title,
-            'text': content,
-            'description': description[:300] if description else '',
-            'meta_title': title,
-            'meta_description': description[:160] if description else '',
-            'meta_keywords': keywords_str,
-            'featureStatus': feature_status,
-            'status': 'ai_processed',
             'updatedAt': now_iso
         }
+
+        if ai_data:
+            title = ai_data.get('titulo_ia') or ai_data.get('title')
+            content = ai_data.get('contenido_ia') or ai_data.get('text')
+            description = ai_data.get('meta_description') or ai_data.get('description')
+            feature_status = ai_data.get('featureStatus') or 'secondary'
+
+            raw_keywords = ai_data.get('meta_keywords') or ai_data.get('palabras_clave') or []
+            keywords_str = ', '.join(raw_keywords) if isinstance(raw_keywords, list) else str(raw_keywords)
+
+            if title:
+                patch_payload['title'] = title
+                patch_payload['meta_title'] = title
+            if content:
+                patch_payload['text'] = content
+            if description:
+                patch_payload['description'] = description[:300]
+                patch_payload['meta_description'] = description[:160]
+            if keywords_str:
+                patch_payload['meta_keywords'] = keywords_str
+            if feature_status:
+                patch_payload['featureStatus'] = feature_status
+            patch_payload['status'] = 'ai_processed'
+
+        final_audio_url = audio_url or (ai_data.get('audio_url') if ai_data else None)
+        final_slide_url = slide_url or (ai_data.get('url_slide') or ai_data.get('slide_url') if ai_data else None)
 
         if final_audio_url:
             patch_payload['audio_url'] = final_audio_url
@@ -265,13 +273,13 @@ class StorageAgent:
 
         return None
 
-    def update_with_ai_and_audio(self, article_id, ai_data, audio_url=None, slide_url=None):
+    def update_with_ai_and_audio(self, article_id, ai_data=None, audio_url=None, slide_url=None):
         """Alias explícito para actualizar con IA y Audio/Slide."""
-        return self.update_with_ai(article_id, ai_data, audio_url=audio_url, slide_url=slide_url)
+        return self.update_with_ai(article_id, ai_data=ai_data, audio_url=audio_url, slide_url=slide_url)
 
-    def update_with_ai_audio_and_slide(self, article_id, ai_data, audio_url=None, slide_url=None):
+    def update_with_ai_audio_and_slide(self, article_id, ai_data=None, audio_url=None, slide_url=None):
         """Actualiza artículo con IA, audio y slide (compatibilidad total con SlideGeneratorAgent)."""
-        return self.update_with_ai(article_id, ai_data, audio_url=audio_url, slide_url=slide_url)
+        return self.update_with_ai(article_id, ai_data=ai_data, audio_url=audio_url, slide_url=slide_url)
 
     def find_pending_ai_articles(self, limit=20):
         """Busca artículos en la base de datos que estén en estado 'draft' y no procesados por IA."""

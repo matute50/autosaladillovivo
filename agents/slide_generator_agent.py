@@ -20,9 +20,16 @@ import sys
 import time
 import hashlib
 import logging
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Union
+
+try:
+    import edge_tts
+    HAS_EDGE_TTS = True
+except ImportError:
+    HAS_EDGE_TTS = False
 
 try:
     import requests
@@ -64,13 +71,14 @@ class SlideGeneratorAgent:
     """
     Agente de generación de slides interactivos con voz rioplatense para Saladillo Vivo.
     """
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides"):
+    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides", voice: str = "es-AR-ElenaNeural"):
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url or "https://otwvfihzaznyjvjtkvvd.supabase.co").rstrip('/')
         self.supabase_key = supabase_key or env_key or ""
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "slides"
+        self.voice = voice  # es-AR-ElenaNeural o es-AR-TomasNeural (Voz neural rioplatense)
         self.logger = logger
 
         # Cliente Supabase SDK oficial
@@ -124,27 +132,56 @@ class SlideGeneratorAgent:
 
     def text_to_speech_rioplatense(self, text: str, language: str = 'es-ES') -> Optional[bytes]:
         """
-        Convierte texto a audio con acento rioplatense (tld='com.ar') usando gTTS.
+        Convierte texto a audio con auténtico acento rioplatense (es-AR) usando Edge TTS (o fallback gTTS).
         """
-        if not HAS_GTTS or not text:
+        if not text:
             return None
 
-        # Limitar longitud para síntesis ágil
         clean_text = text.replace('\n', ' ').strip()
         if len(clean_text) > 4000:
             clean_text = clean_text[:4000].rsplit('.', 1)[0] + "."
 
-        for tld in ['com.ar', 'com']:
+        # 1. Edge TTS con voz rioplatense auténtica (Elena / Tomás)
+        if HAS_EDGE_TTS:
             try:
-                tts = gTTS(text=clean_text, lang=language, slow=False, tld=tld)
-                fp = io.BytesIO()
-                tts.write_to_fp(fp)
-                fp.seek(0)
-                audio_bytes = fp.read()
-                if audio_bytes:
+                async def _synthesize():
+                    comm = edge_tts.Communicate(clean_text, self.voice)
+                    audio_data = bytearray()
+                    async for chunk in comm.stream():
+                        if chunk.get("type") == "audio":
+                            audio_data.extend(chunk["data"])
+                    return bytes(audio_data)
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
+                    else:
+                        audio_bytes = loop.run_until_complete(_synthesize())
+                except RuntimeError:
+                    audio_bytes = asyncio.run(_synthesize())
+
+                if audio_bytes and len(audio_bytes) > 1000:
+                    self.logger.info(f"Voz rioplatense sintetizada exitosamente ({self.voice}): {len(audio_bytes)} bytes")
                     return audio_bytes
             except Exception as e:
-                self.logger.warning(f"Intento TTS con tld={tld} falló: {e}")
+                self.logger.warning(f"Error en Edge TTS rioplatense ({self.voice}): {e}")
+
+        # 2. Fallback gTTS
+        if HAS_GTTS:
+            for tld in ['com.ar', 'com']:
+                try:
+                    tts = gTTS(text=clean_text, lang=language, slow=False, tld=tld)
+                    fp = io.BytesIO()
+                    tts.write_to_fp(fp)
+                    fp.seek(0)
+                    audio_bytes = fp.read()
+                    if audio_bytes:
+                        return audio_bytes
+                except Exception as e:
+                    self.logger.warning(f"Intento TTS fallback con tld={tld} falló: {e}")
 
         return None
 
@@ -297,31 +334,61 @@ class SlideGeneratorAgent:
             padding: 35px 40px;
         }
         
+        @keyframes kenBurnsZoom {
+            0% {
+                transform: scale(1.0);
+            }
+            50% {
+                transform: scale(1.08);
+            }
+            100% {
+                transform: scale(1.0);
+            }
+        }
+        
         .slide-images {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
             margin-bottom: 30px;
+            width: 100%;
         }
         
         .slide-image-wrapper {
             position: relative;
-            border-radius: 16px;
+            border-radius: 18px;
             overflow: hidden;
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-            height: 260px;
-            background: #1e293b;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+            min-height: 320px;
+            max-height: 480px;
+            height: auto;
+            background: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .slide-image {
             width: 100%;
             height: 100%;
+            max-height: 480px;
             object-fit: cover;
-            transition: transform 0.4s ease;
+            object-position: center;
+            animation: kenBurnsZoom 16s ease-in-out infinite alternate;
+            transform-origin: center center;
+            will-change: transform;
+            transition: filter 0.4s ease;
         }
         
-        .slide-image-wrapper:hover .slide-image {
-            transform: scale(1.04);
+        .slide-image-wrapper:nth-child(2) .slide-image {
+            animation-duration: 20s;
+            animation-delay: -5s;
+        }
+        
+        .slide-image-wrapper:nth-child(3) .slide-image {
+            animation-duration: 18s;
+            animation-delay: -10s;
         }
         
         .slide-text {
@@ -665,17 +732,36 @@ class SlideGeneratorAgent:
                         article = r.json()[0]
 
                 if article:
+                    # Recopilar todas las imágenes asociadas a la noticia
                     img_list = []
-                    if article.get('image_url'):
+                    raw_images = article.get('images_urls')
+                    if isinstance(raw_images, list):
+                        for u in raw_images:
+                            if u and isinstance(u, str) and u.startswith('http') and u not in img_list:
+                                img_list.append(u)
+                    elif isinstance(raw_images, str) and raw_images.startswith('['):
+                        try:
+                            import json
+                            parsed = json.loads(raw_images)
+                            if isinstance(parsed, list):
+                                for u in parsed:
+                                    if u and isinstance(u, str) and u.startswith('http') and u not in img_list:
+                                        img_list.append(u)
+                        except Exception:
+                            pass
+
+                    if article.get('image_url') and article['image_url'] not in img_list:
                         img_list.append(article['image_url'])
-                    elif article.get('og_image_url'):
+                    if article.get('og_image_url') and article['og_image_url'] not in img_list:
                         img_list.append(article['og_image_url'])
+
+                    audio_url = article.get('audio_url') or ''
 
                     slide_url = self.process_article_slide(
                         article_id=article_id,
                         title=article.get('title') or 'Sin título',
                         text=article.get('text') or '',
-                        audio_url=article.get('audio_url', ''),
+                        audio_url=audio_url,
                         image_urls=img_list
                     )
                     results[article_id] = slide_url

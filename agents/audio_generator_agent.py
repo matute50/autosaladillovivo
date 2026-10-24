@@ -21,9 +21,16 @@ import re
 import time
 import hashlib
 import logging
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Union
+
+try:
+    import edge_tts
+    HAS_EDGE_TTS = True
+except ImportError:
+    HAS_EDGE_TTS = False
 
 try:
     from gtts import gTTS
@@ -53,13 +60,14 @@ class AudioGeneratorAgent:
     """
     Agente de generación y publicación de audios para noticias de Saladillo Vivo.
     """
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/audios"):
+    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/audios", voice: str = "es-AR-ElenaNeural"):
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url).rstrip('/')
         self.supabase_key = supabase_key or env_key
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "audios"
+        self.voice = voice  # es-AR-ElenaNeural o es-AR-TomasNeural (Español rioplatense argentino auténtico)
 
         self._ensure_storage_bucket()
 
@@ -117,28 +125,55 @@ class AudioGeneratorAgent:
         return f"article_{article_id}_{file_hash}.mp3"
 
     def text_to_speech(self, text: str, language: str = 'es') -> Optional[bytes]:
-        """Convierte texto a audio usando gTTS con acento rioplatense (tld='com.ar') y fallback."""
-        if not HAS_GTTS:
-            logger.error("gTTS no está instalado. Ejecute: pip install gtts")
-            return None
-
-        # Intentar primero con acento local de Argentina
-        for tld_option in ['com.ar', None]:
+        """Convierte texto a audio con auténtico acento rioplatense (es-AR) usando Edge TTS (o fallback gTTS)."""
+        # 1. Prioridad: Edge TTS con voz rioplatense (es-AR-ElenaNeural o es-AR-TomasNeural)
+        if HAS_EDGE_TTS:
             try:
-                if tld_option:
-                    tts = gTTS(text=text, lang=language, tld=tld_option, slow=False)
-                else:
-                    tts = gTTS(text=text, lang=language, slow=False)
+                async def _synthesize():
+                    comm = edge_tts.Communicate(text, self.voice)
+                    audio_data = bytearray()
+                    async for chunk in comm.stream():
+                        if chunk.get("type") == "audio":
+                            audio_data.extend(chunk["data"])
+                    return bytes(audio_data)
 
-                fp = io.BytesIO()
-                tts.write_to_fp(fp)
-                fp.seek(0)
-                data = fp.getvalue()
-                if len(data) > 1000:
-                    return data
+                # Ejecutar de forma segura según el contexto de bucle de eventos
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
+                    else:
+                        audio_bytes = loop.run_until_complete(_synthesize())
+                except RuntimeError:
+                    audio_bytes = asyncio.run(_synthesize())
+
+                if audio_bytes and len(audio_bytes) > 1000:
+                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Rioplatense): {len(audio_bytes)} bytes")
+                    return audio_bytes
             except Exception as e:
-                logger.warning(f"Intento gTTS (tld={tld_option}) falló: {e}")
+                logger.warning(f"Error en Edge TTS rioplatense ({self.voice}), activando fallback: {e}")
 
+        # 2. Fallback secundario: gTTS con tld='com.ar'
+        if HAS_GTTS:
+            for tld_option in ['com.ar', None]:
+                try:
+                    if tld_option:
+                        tts = gTTS(text=text, lang=language, tld=tld_option, slow=False)
+                    else:
+                        tts = gTTS(text=text, lang=language, slow=False)
+
+                    fp = io.BytesIO()
+                    tts.write_to_fp(fp)
+                    fp.seek(0)
+                    data = fp.getvalue()
+                    if len(data) > 1000:
+                        return data
+                except Exception as e:
+                    logger.warning(f"Intento gTTS fallback (tld={tld_option}) falló: {e}")
+
+        logger.error("No hay motor TTS disponible para síntesis.")
         return None
 
     def optimize_audio(self, audio_bytes: bytes) -> bytes:
