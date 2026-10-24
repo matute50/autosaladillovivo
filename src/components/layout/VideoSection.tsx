@@ -654,7 +654,7 @@ const VideoSection: React.FC = () => {
           {/* === ANTI-GRAVITY UI LAYER (STATIC & PRESERVED) === */}
           <AntiGravityLayer areCinematicBarsActive={areCinematicBarsActive}>
 
-            {isNewsContent && (
+            {isNewsContent && !isNewsSlide && !isHtmlSlideActive && (
               <>
                 <div className="absolute inset-x-0 top-0 top-safe-area z-[50] p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
                   <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 inline-block max-w-[90%] md:max-w-[70%] shadow-2xl">
@@ -670,7 +670,7 @@ const VideoSection: React.FC = () => {
               </>
             )}
 
-            <WeatherOverlay />
+            {!isNewsSlide && !isHtmlSlideActive && <WeatherOverlay />}
 
             <AnimatePresence>
               {showControls && !isHtmlSlideActive && !isLocalIntro && !isPreRollOverlayActive && (
