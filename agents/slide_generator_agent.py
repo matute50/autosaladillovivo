@@ -251,352 +251,219 @@ class SlideGeneratorAgent:
             box-sizing: border-box;
         }
         
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow-x: hidden;
-            color: #f8fafc;
-            padding: 20px;
-        }
-        
-        .slide-container {
-            width: 100%;
-            max-width: 1200px;
-            background: rgba(15, 23, 42, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 24px;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(20px);
-            overflow: hidden;
-            position: relative;
-        }
-        
-        .slide-header {
-            background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(51, 65, 85, 0.9) 100%);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            color: white;
-            padding: 35px 40px 30px 100px;
-            position: relative;
-        }
-        
-        .saladillo-logo {
-            position: absolute;
-            top: 25px;
-            left: 30px;
-            width: 55px;
-            height: 55px;
-            background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 800;
-            font-size: 1.25rem;
-            box-shadow: 0 8px 20px rgba(2, 132, 199, 0.4);
-            letter-spacing: -0.5px;
-        }
-        
-        .slide-badge {
-            display: inline-block;
-            background: rgba(14, 165, 233, 0.2);
-            color: #38bdf8;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 4px 12px;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-        }
-        
-        .slide-title {
-            font-size: 2.1rem;
-            font-weight: 800;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-            line-height: 1.25;
-            color: #ffffff;
-        }
-        
-        .slide-subtitle {
-            font-size: 1.05rem;
-            color: #94a3b8;
-            font-weight: 400;
-        }
-        
-        .slide-content {
-            padding: 35px 40px;
-        }
-        
-        @keyframes kenBurnsZoom {
-            0% {
-                transform: scale(1.0);
-            }
-            50% {
-                transform: scale(1.08);
-            }
-            100% {
-                transform: scale(1.0);
-            }
-        }
-        
-        .slide-images {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 24px;
-            margin-bottom: 30px;
-            width: 100%;
-        }
-        
-        .slide-image-wrapper {
-            position: relative;
-            border-radius: 18px;
-            overflow: hidden;
-            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-            min-height: 320px;
-            max-height: 480px;
-            height: auto;
-            background: #0f172a;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .slide-image {
+        html, body {
             width: 100%;
             height: 100%;
-            max-height: 480px;
+            overflow: hidden;
+            background-color: #000000;
+            user-select: none;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .fullscreen-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+        }
+
+        /* Capas de fotos con transición suave de opacidad (Crossfade) */
+        .photo-slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 1.6s ease-in-out;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .photo-slide.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Fondo borroso ambiental para formato cinematográfico */
+        .photo-backdrop {
+            position: absolute;
+            top: -10%;
+            left: -10%;
+            width: 120%;
+            height: 120%;
+            background-size: cover;
+            background-position: center;
+            filter: blur(30px) brightness(0.35);
+            transform: scale(1.1);
+        }
+
+        /* Foto principal nítida con Ken Burns continuo */
+        .photo-main {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             object-fit: cover;
             object-position: center;
-            animation: kenBurnsZoom 16s ease-in-out infinite alternate;
-            transform-origin: center center;
             will-change: transform;
-            transition: filter 0.4s ease;
+            animation: kenBurnsZoom 16s ease-in-out infinite alternate;
         }
-        
-        .slide-image-wrapper:nth-child(2) .slide-image {
+
+        .photo-slide:nth-child(2) .photo-main {
             animation-duration: 20s;
-            animation-delay: -5s;
+            animation-delay: -4s;
         }
-        
-        .slide-image-wrapper:nth-child(3) .slide-image {
+
+        .photo-slide:nth-child(3) .photo-main {
             animation-duration: 18s;
-            animation-delay: -10s;
+            animation-delay: -8s;
         }
-        
-        .slide-text {
-            font-size: 1.15rem;
-            line-height: 1.85;
-            color: #e2e8f0;
-            text-align: justify;
-            margin-bottom: 25px;
-            background: rgba(30, 41, 59, 0.5);
-            padding: 25px;
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
+
+        @keyframes kenBurnsZoom {
+            0% {
+                transform: scale(1.0) translate(0, 0);
+            }
+            50% {
+                transform: scale(1.08) translate(-1%, -0.8%);
+            }
+            100% {
+                transform: scale(1.0) translate(0, 0);
+            }
         }
-        
-        .audio-controls {
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            background: rgba(15, 23, 42, 0.92);
-            backdrop-filter: blur(16px);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 14px 22px;
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+
+        /* Mosca sutil de Saladillo Vivo (estilo TV) */
+        .tv-watermark {
+            position: absolute;
+            top: 24px;
+            right: 28px;
+            z-index: 50;
             display: flex;
             align-items: center;
-            gap: 16px;
-            z-index: 1000;
-            transition: transform 0.2s, box-shadow 0.2s;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 9999px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
         }
-        
-        .audio-controls:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 20px 40px rgba(2, 132, 199, 0.25);
-        }
-        
-        .play-button {
-            background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 1.1rem;
-            transition: all 0.25s ease;
-            box-shadow: 0 4px 15px rgba(2, 132, 199, 0.4);
-        }
-        
-        .play-button:hover {
-            transform: scale(1.08);
-            background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
-        }
-        
-        .audio-info {
-            color: #f1f5f9;
-            font-size: 0.9rem;
-            line-height: 1.3;
-        }
-        
-        .audio-info .badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-weight: 600;
-            color: #38bdf8;
-        }
-        
-        .audio-info small {
-            color: #94a3b8;
-            font-size: 0.78rem;
-        }
-        
-        .slide-footer {
-            background: rgba(15, 23, 42, 0.7);
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            padding: 18px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: #64748b;
-            font-size: 0.85rem;
-        }
-        
-        .pulse-dot {
+
+        .tv-watermark .live-dot {
             width: 8px;
             height: 8px;
-            background: #22c55e;
+            background: #ef4444;
             border-radius: 50%;
-            display: inline-block;
-            box-shadow: 0 0 10px #22c55e;
-            animation: pulse 1.8s infinite;
+            box-shadow: 0 0 8px #ef4444;
+            animation: pulse 1.5s infinite;
         }
-        
+
         @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.4; transform: scale(0.85); }
         }
-        
-        @media (max-width: 768px) {
-            body { padding: 10px; }
-            .slide-header { padding: 25px 20px 20px 80px; }
-            .saladillo-logo { top: 20px; left: 18px; width: 48px; height: 48px; font-size: 1.1rem; }
-            .slide-title { font-size: 1.5rem; }
-            .slide-content { padding: 20px; }
-            .slide-text { font-size: 1rem; padding: 18px; line-height: 1.7; }
-            .slide-images { grid-template-columns: 1fr; }
-            .audio-controls { bottom: 15px; right: 15px; left: 15px; justify-content: center; }
-            .slide-footer { flex-direction: column; gap: 8px; text-align: center; }
+
+        /* Barra inferior cinematográfica sutil (sin texto de noticia) */
+        .tv-bottom-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 60%, transparent 100%);
+            z-index: 40;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.85rem;
+        }
+
+        .audio-trigger {
+            background: rgba(2, 132, 199, 0.85);
+            border: none;
+            color: white;
+            border-radius: 50%;
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.95rem;
+            backdrop-filter: blur(6px);
+            transition: transform 0.2s, background 0.2s;
+        }
+        .audio-trigger:hover {
+            transform: scale(1.1);
+            background: rgba(2, 132, 199, 1);
         }
     </style>
 </head>
 <body>
-    <div class="slide-container">
-        <div class="saladillo-logo">SV</div>
-        
-        <div class="slide-header">
-            <span class="slide-badge">Saladillo Vivo • Noticias En Vivo</span>
-            <h1 class="slide-title">{{ title }}</h1>
-            <p class="slide-subtitle">Portal Hiperlocal de Noticias y Streaming Temático</p>
+    <div class="fullscreen-container" id="slideshowContainer">
+        {% for img in images %}
+        <div class="photo-slide {% if loop.first %}active{% endif %}">
+            <div class="photo-backdrop" style="background-image: url('{{ img }}');"></div>
+            <img src="{{ img }}" alt="Foto noticia" class="photo-main" onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
+        {% endfor %}
         
-        <div class="slide-content">
-            {% if images and images|length > 0 %}
-            <div class="slide-images">
-                {% for image_url in images %}
-                <div class="slide-image-wrapper">
-                    <img src="{{ image_url }}" alt="Fotografía de la noticia" class="slide-image" loading="lazy" onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
-                </div>
-                {% endfor %}
-            </div>
+        <div class="tv-watermark">
+            <span class="live-dot"></span>
+            <span>SALADILLO VIVO</span>
+        </div>
+
+        <div class="tv-bottom-bar">
+            <span>Transmisión Oficial</span>
+            {% if audio_url %}
+            <button class="audio-trigger" id="audioToggle" aria-label="Audio">🔊</button>
             {% endif %}
-            
-            <div class="slide-text">
-                {{ text }}
-            </div>
-        </div>
-        
-        <div class="slide-footer">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="pulse-dot"></span>
-                <span>Transmisión Oficial Saladillo Vivo</span>
-            </div>
-            <p>saladillovivo.com.ar • Sistema de Automatización Periodística</p>
         </div>
     </div>
-    
+
     {% if audio_url %}
-    <div class="audio-controls">
-        <button class="play-button" id="playButton" aria-label="Reproducir o pausar locución">▶</button>
-        <div class="audio-info">
-            <div class="badge">🎙️ Voz Rioplatense</div>
-            <small id="audioStatusText">Reproducir locución</small>
-        </div>
-    </div>
-    
     <audio id="slideAudio" src="{{ audio_url }}" preload="auto" playsinline></audio>
-    
+    {% endif %}
+
     <script>
         (function() {
-            var playButton = document.getElementById('playButton');
-            var audio = document.getElementById('slideAudio');
-            var statusText = document.getElementById('audioStatusText');
-            
-            if (!playButton || !audio) return;
-            
-            function updatePlayState(playing) {
-                playButton.textContent = playing ? '⏸' : '▶';
-                if (statusText) {
-                    statusText.textContent = playing ? 'Reproduciendo...' : 'Pausado (Clic para escuchar)';
-                }
+            // Ciclo automático de seguidilla de fotos si hay más de 1
+            var slides = document.querySelectorAll('.photo-slide');
+            if (slides && slides.length > 1) {
+                var currentIndex = 0;
+                setInterval(function() {
+                    slides[currentIndex].classList.remove('active');
+                    currentIndex = (currentIndex + 1) % slides.length;
+                    slides[currentIndex].classList.add('active');
+                }, 5500);
             }
-            
-            playButton.addEventListener('click', function(e) {
-                e.stopPropagation();
-                if (audio.paused) {
-                    audio.play().then(function() {
-                        updatePlayState(true);
-                    }).catch(function(err) {
-                        console.warn('Interacción requerida para reproducción:', err);
-                    });
-                } else {
-                    audio.pause();
-                    updatePlayState(false);
-                }
-            });
-            
-            audio.addEventListener('play', function() { updatePlayState(true); });
-            audio.addEventListener('pause', function() { updatePlayState(false); });
-            audio.addEventListener('ended', function() { updatePlayState(false); });
-            
-            // Intentar auto-reproducir respetando políticas de autoplay
-            window.addEventListener('load', function() {
-                var playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(function() {
-                        updatePlayState(true);
-                    }).catch(function() {
-                        updatePlayState(false);
-                    });
-                }
-            });
+
+            var audio = document.getElementById('slideAudio');
+            var btn = document.getElementById('audioToggle');
+            if (audio && btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (audio.paused) {
+                        audio.play();
+                        btn.textContent = '🔊';
+                    } else {
+                        audio.pause();
+                        btn.textContent = '🔇';
+                    }
+                });
+            }
         })();
     </script>
-    {% endif %}
 </body>
 </html>"""
 
@@ -754,6 +621,14 @@ class SlideGeneratorAgent:
                         img_list.append(article['image_url'])
                     if article.get('og_image_url') and article['og_image_url'] not in img_list:
                         img_list.append(article['og_image_url'])
+
+                    body_text = (article.get('text') or '') + ' ' + (article.get('description') or '')
+                    if '<img' in body_text:
+                        import re
+                        img_srcs = re.findall(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', body_text, re.IGNORECASE)
+                        for s in img_srcs:
+                            if s not in img_list and not any(ext in s.lower() for ext in ['.svg', 'avatar', 'logo']):
+                                img_list.append(s)
 
                     audio_url = article.get('audio_url') or ''
 
