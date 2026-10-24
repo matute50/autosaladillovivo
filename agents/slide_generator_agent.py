@@ -243,7 +243,7 @@ class SlideGeneratorAgent:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }} - Saladillo Vivo</title>
+    <title>{{ title }}</title>
     <style>
         * {
             margin: 0;
@@ -256,8 +256,6 @@ class SlideGeneratorAgent:
             height: 100%;
             overflow: hidden;
             background-color: #000000;
-            user-select: none;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         .fullscreen-container {
@@ -267,7 +265,7 @@ class SlideGeneratorAgent:
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background: #000;
+            background: #000000;
         }
 
         /* Capas de fotos con transición suave de opacidad (Crossfade) */
@@ -278,7 +276,7 @@ class SlideGeneratorAgent:
             width: 100%;
             height: 100%;
             opacity: 0;
-            transition: opacity 1.6s ease-in-out;
+            transition: opacity 1.5s ease-in-out;
             pointer-events: none;
             overflow: hidden;
         }
@@ -288,7 +286,7 @@ class SlideGeneratorAgent:
             pointer-events: auto;
         }
 
-        /* Fondo borroso ambiental para formato cinematográfico */
+        /* Fondo borroso ambiental para evitar letterboxing y llenar 100% */
         .photo-backdrop {
             position: absolute;
             top: -10%;
@@ -297,11 +295,11 @@ class SlideGeneratorAgent:
             height: 120%;
             background-size: cover;
             background-position: center;
-            filter: blur(30px) brightness(0.35);
-            transform: scale(1.1);
+            filter: blur(28px) brightness(0.4);
+            transform: scale(1.15);
         }
 
-        /* Foto principal nítida con Ken Burns continuo */
+        /* Foto principal nítida con animación Ken Burns continua ocupando el 100% */
         .photo-main {
             position: absolute;
             top: 0;
@@ -326,86 +324,14 @@ class SlideGeneratorAgent:
 
         @keyframes kenBurnsZoom {
             0% {
-                transform: scale(1.0) translate(0, 0);
+                transform: scale(1.0);
             }
             50% {
-                transform: scale(1.08) translate(-1%, -0.8%);
+                transform: scale(1.09);
             }
             100% {
-                transform: scale(1.0) translate(0, 0);
+                transform: scale(1.0);
             }
-        }
-
-        /* Mosca sutil de Saladillo Vivo (estilo TV) */
-        .tv-watermark {
-            position: absolute;
-            top: 24px;
-            right: 28px;
-            z-index: 50;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(0, 0, 0, 0.45);
-            backdrop-filter: blur(10px);
-            padding: 8px 16px;
-            border-radius: 9999px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            color: #ffffff;
-            font-size: 0.82rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-        }
-
-        .tv-watermark .live-dot {
-            width: 8px;
-            height: 8px;
-            background: #ef4444;
-            border-radius: 50%;
-            box-shadow: 0 0 8px #ef4444;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
-        }
-
-        /* Barra inferior cinematográfica sutil (sin texto de noticia) */
-        .tv-bottom-bar {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 60px;
-            background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 60%, transparent 100%);
-            z-index: 40;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 28px;
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 0.85rem;
-        }
-
-        .audio-trigger {
-            background: rgba(2, 132, 199, 0.85);
-            border: none;
-            color: white;
-            border-radius: 50%;
-            width: 38px;
-            height: 38px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 0.95rem;
-            backdrop-filter: blur(6px);
-            transition: transform 0.2s, background 0.2s;
-        }
-        .audio-trigger:hover {
-            transform: scale(1.1);
-            background: rgba(2, 132, 199, 1);
         }
     </style>
 </head>
@@ -414,30 +340,17 @@ class SlideGeneratorAgent:
         {% for img in images %}
         <div class="photo-slide {% if loop.first %}active{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img }}');"></div>
-            <img src="{{ img }}" alt="Foto noticia" class="photo-main" onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
+            <img src="{{ img }}" alt="" class="photo-main" onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
         {% endfor %}
-        
-        <div class="tv-watermark">
-            <span class="live-dot"></span>
-            <span>SALADILLO VIVO</span>
-        </div>
-
-        <div class="tv-bottom-bar">
-            <span>Transmisión Oficial</span>
-            {% if audio_url %}
-            <button class="audio-trigger" id="audioToggle" aria-label="Audio">🔊</button>
-            {% endif %}
-        </div>
     </div>
 
     {% if audio_url %}
-    <audio id="slideAudio" src="{{ audio_url }}" preload="auto" playsinline></audio>
+    <audio id="slideAudio" src="{{ audio_url }}" preload="auto" playsinline style="display:none;"></audio>
     {% endif %}
 
     <script>
         (function() {
-            // Ciclo automático de seguidilla de fotos si hay más de 1
             var slides = document.querySelectorAll('.photo-slide');
             if (slides && slides.length > 1) {
                 var currentIndex = 0;
@@ -446,21 +359,6 @@ class SlideGeneratorAgent:
                     currentIndex = (currentIndex + 1) % slides.length;
                     slides[currentIndex].classList.add('active');
                 }, 5500);
-            }
-
-            var audio = document.getElementById('slideAudio');
-            var btn = document.getElementById('audioToggle');
-            if (audio && btn) {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    if (audio.paused) {
-                        audio.play();
-                        btn.textContent = '🔊';
-                    } else {
-                        audio.pause();
-                        btn.textContent = '🔇';
-                    }
-                });
             }
         })();
     </script>
