@@ -106,22 +106,27 @@ TÍTULO ORIGINAL:
 CONTENIDO ORIGINAL:
 {content}
 
-DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
-1. TÍTULO GANCHO (MÁXIMO 6 PALABRAS):
-   - El título DEBE tener como MÁXIMO 6 PALABRAS (estrictamente entre 3 y 6 palabras).
-   - Su objetivo principal es provocar intriga, impacto y curiosidad inmediata sobre la noticia para el lector que ve la foto en portada.
-   - Potente, directo y enérgico (ejemplos: "El insólito hallazgo en Saladillo", "Alerta total por las lluvias", "Millonaria inversión cambia la ciudad").
-   - Prohibido exceder las 6 palabras. Cero títulos burocráticos o aburridos.
+DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
 
-2. CUERPO DE LA NOTICIA (ADAPTADO PARA LOCUCIÓN EN GOOGLE TTS DE 35 A 45 SEGUNDOS):
-   - EXTENSIÓN EXACTA: Redacta un texto condensado de estrictamente entre 80 y 110 palabras (aproximadamente 500 a 680 caracteres). A velocidad normal de lectura en Google TTS (135 a 150 palabras por minuto), esta extensión garantiza exactamente entre 35 y 45 segundos de duración.
-   - RITMO Y PUNTUACIÓN RIOPLATENSE: Usa oraciones directas, ágiles y con comas bien ubicadas para generar las pausas y la respiración de un locutor de radio bonaerense.
-   - ACENTUACIÓN Y VOCABULARIO: Cuidar estrictamente la acentuación de las palabras según el uso en el español rioplatense (ej. "llegó", "inauguró", "destacó", "firmó", "continuará").
-   - NO REPETIR FRASES: Prohibido repetir ideas, frases o muletillas entre el inicio y el final. Cada oración debe aportar un dato nuevo y concreto.
-   - ESTRUCTURA RADIAL:
-     * Párrafo 1 (2-3 oraciones): El hecho principal y protagonistas (qué y quién en Saladillo).
-     * Párrafo 2 (2-3 oraciones): El impacto, detalles clave y cierre informativo.
-   - VERACIDAD: Fidelidad absoluta a nombres, lugares, fechas y cifras del original. Cero datos inventados.
+1. TITULAR RADIAL (GANCHO DIRECTO DE HASTA 12 PALABRAS):
+   - El titular cumple función de gancho para el oyente: resume la esencia de la noticia de forma impactante y muy rápida.
+   - Longitud: Debe leerse en menos de 3 o 4 segundos (MÁXIMO 12 PALABRAS, típicamente de 5 a 10 palabras).
+   - Estructura fuerte en tiempo PRESENTE: Dale actualidad y urgencia (ej. "el intendente anuncia", "la policía detiene", "comienzan las obras"), incluso si el hecho ocurrió ayer.
+   - Cero misterio ("sin gancho ciego"): No uses frases vacías tipo "Mirá lo que pasó". El oyente necesita saber de qué se trata inmediatamente.
+   - Ejemplos:
+     * Diario: "El Gobierno nacional anunció un nuevo paquete de medidas económicas tras la reunión de gabinete de ayer."
+     * Radial correcto: "Nuevo ajuste: el Gobierno anuncia medidas económicas."
+     * Local: "Obras viales: Saladillo repavimenta los accesos principales."
+
+2. CUERPO DE LA NOTICIA RADIAL (35 A 45 SEGUNDOS DE LOCUCIÓN):
+   - EXTENSIÓN EXACTA: Redacta un despacho condensado de estrictamente entre 80 y 110 palabras. A la velocidad normal de Google TTS (140 palabras/minuto), garantiza exactamente entre 35 y 45 segundos de audio completo.
+   - BREVEDAD Y CONCISIÓN: Oraciones cortas. Una sola idea por oración. Evita subordinadas largas que dejen sin aire al oyente.
+   - ESTILO DIRECTO Y COLOQUIAL: Escribe como se habla en la radio bonaerense/rioplatense, cercano y natural, pero con rigor periodístico.
+   - VOZ ACTIVA OBLIGATORIA: Siempre voz activa ("El municipio licitó la obra...", nunca "La obra fue licitada por el municipio..."). Aporta dinamismo y contundencia.
+   - SIN CIFRAS COMPLEJAS: Redondea números para el oído (en vez de "1.428.390 pesos", decir "casi un millón y medio de pesos"; en vez de "3.284 metros", decir "más de tres kilómetros").
+   - PUNTUACIÓN RADIAL: Usa únicamente puntos y comas. Prohibido usar punto y coma (;), paréntesis () o guiones largos. Si necesitas acotar algo, hazlo en una oración corta independiente.
+   - CERO REPETICIÓN: Cada frase debe sumar un dato nuevo. No repitas palabras ni ideas entre el inicio y el cierre.
+   - FONÉTICA Y ACENTUACIÓN RIOPLATENSE: Cuida la correcta acentuación en verbos y términos locales (llegó, anunció, inauguró, continuará).
 
 3. META DESCRIPCIÓN Y ETIQUETAS:
    - Meta descripción SEO concisa de máximo 155 caracteres.
@@ -129,8 +134,8 @@ DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
-  "titulo_optimizado": "Título gancho de máx 6 palabras",
-  "contenido_optimizado": "Cuerpo breve de 80 a 110 palabras listo para ser locutado...",
+  "titulo_optimizado": "Titular radial corto y directo en presente (máximo 12 palabras)",
+  "contenido_optimizado": "Texto radial breve de 80 a 110 palabras en voz activa...",
   "meta_description": "Resumen conciso para SEO...",
   "palabras_clave": ["Saladillo", "tema1", "tema2"]
 }}"""
@@ -253,13 +258,13 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
     def local_heuristic_fallback(self, title, content):
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
-        Reestructura el texto con reglas de estilo periodístico de Saladillo Vivo y título gancho de máx 6 palabras.
+        Reestructura el texto con reglas de estilo periodístico radial de Saladillo Vivo y titular de máx 12 palabras.
         """
-        # Limpiar y condensar a título gancho de máximo 6 palabras
+        # Limpiar y condensar a titular radial de máximo 12 palabras
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
         words = clean_title.split()
-        if len(words) > 6:
-            hook_title = " ".join(words[:6]).rstrip(' ,.:;')
+        if len(words) > 12:
+            hook_title = " ".join(words[:12]).rstrip(' ,.:;')
         else:
             hook_title = clean_title
 
