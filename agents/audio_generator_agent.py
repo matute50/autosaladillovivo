@@ -130,10 +130,60 @@ class AudioGeneratorAgent:
         return f"article_{article_id}_{file_hash}.mp3"
 
     def text_to_speech(self, text: str, language: str = 'es') -> Optional[bytes]:
-        """Convierte texto a audio con auténtico acento rioplatense (es-AR).
-        Prioridad: 1. API Externa TTS (si está configurada) -> 2. Edge TTS (es-AR-TomasNeural) -> 3. Fallback gTTS.
+        """Convierte texto a audio.
+        Prioridad por defecto:
+        1. Google TTS (gTTS tld='com.ar' para entonación argentina).
+        2. Edge TTS (es-AR-TomasNeural) como respaldo.
+        3. API Externa TTS (si está configurada).
         """
-        # 0. Prioridad Cero: API externa personalizada si se definió TTS_API_KEY
+        # 1. Prioridad Principal: Google TTS (gTTS) con acento argentino
+        if HAS_GTTS:
+            for tld_option in ['com.ar', 'com', None]:
+                try:
+                    if tld_option:
+                        tts = gTTS(text=text, lang=language, tld=tld_option, slow=False)
+                    else:
+                        tts = gTTS(text=text, lang=language, slow=False)
+
+                    fp = io.BytesIO()
+                    tts.write_to_fp(fp)
+                    fp.seek(0)
+                    data = fp.getvalue()
+                    if len(data) > 1000:
+                        logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option})")
+                        return data
+                except Exception as e:
+                    logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
+
+        # 2. Respaldo: Edge TTS con voz rioplatense (es-AR-TomasNeural)
+        if HAS_EDGE_TTS:
+            try:
+                async def _synthesize():
+                    comm = edge_tts.Communicate(text, self.voice)
+                    audio_data = bytearray()
+                    async for chunk in comm.stream():
+                        if chunk.get("type") == "audio":
+                            audio_data.extend(chunk["data"])
+                    return bytes(audio_data)
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
+                    else:
+                        audio_bytes = loop.run_until_complete(_synthesize())
+                except RuntimeError:
+                    audio_bytes = asyncio.run(_synthesize())
+
+                if audio_bytes and len(audio_bytes) > 1000:
+                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Respaldo): {len(audio_bytes)} bytes")
+                    return audio_bytes
+            except Exception as e:
+                logger.warning(f"Error en Edge TTS de respaldo: {e}")
+
+        # 3. API Externa personalizada (si está configurada en .env)
         if self.tts_api_key and self.tts_voice_id and HAS_REQUESTS:
             try:
                 headers = {
@@ -151,59 +201,10 @@ class AudioGeneratorAgent:
                 }
                 resp = requests.post(url, headers=headers, json=data, timeout=30)
                 if resp.status_code == 200 and len(resp.content) > 1000:
-                    logger.info("Audio sintetizado con éxito con API Externa TTS Rioplatense")
+                    logger.info("Audio sintetizado con éxito con API Externa TTS")
                     return resp.content
-                else:
-                    logger.warning(f"Fallo en API Externa TTS (HTTP {resp.status_code}), activando fallback")
             except Exception as e:
-                logger.warning(f"Error en llamada a API Externa TTS: {e}")
-
-        # 1. Prioridad: Edge TTS con voz rioplatense (es-AR-ElenaNeural o es-AR-TomasNeural)
-        if HAS_EDGE_TTS:
-            try:
-                async def _synthesize():
-                    comm = edge_tts.Communicate(text, self.voice)
-                    audio_data = bytearray()
-                    async for chunk in comm.stream():
-                        if chunk.get("type") == "audio":
-                            audio_data.extend(chunk["data"])
-                    return bytes(audio_data)
-
-                # Ejecutar de forma segura según el contexto de bucle de eventos
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
-                    else:
-                        audio_bytes = loop.run_until_complete(_synthesize())
-                except RuntimeError:
-                    audio_bytes = asyncio.run(_synthesize())
-
-                if audio_bytes and len(audio_bytes) > 1000:
-                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Rioplatense): {len(audio_bytes)} bytes")
-                    return audio_bytes
-            except Exception as e:
-                logger.warning(f"Error en Edge TTS rioplatense ({self.voice}), activando fallback: {e}")
-
-        # 2. Fallback secundario: gTTS con tld='com.ar'
-        if HAS_GTTS:
-            for tld_option in ['com.ar', None]:
-                try:
-                    if tld_option:
-                        tts = gTTS(text=text, lang=language, tld=tld_option, slow=False)
-                    else:
-                        tts = gTTS(text=text, lang=language, slow=False)
-
-                    fp = io.BytesIO()
-                    tts.write_to_fp(fp)
-                    fp.seek(0)
-                    data = fp.getvalue()
-                    if len(data) > 1000:
-                        return data
-                except Exception as e:
-                    logger.warning(f"Intento gTTS fallback (tld={tld_option}) falló: {e}")
+                logger.warning(f"Error en API Externa TTS: {e}")
 
         logger.error("No hay motor TTS disponible para síntesis.")
         return None
