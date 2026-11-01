@@ -106,12 +106,13 @@ TÍTULO ORIGINAL:
 CONTENIDO ORIGINAL:
 {content}
 
-DIRECTIVAS EDITORIALES:
-1. Redacta un título periodístico atractivo, claro, directo y optimizado para lectores digitales de Saladillo.
-2. Reestructura el cuerpo de la noticia: añade un primer párrafo de entrada (lead) potente con el qué, quién, cuándo y dónde. Organiza el desarrollo en párrafos legibles y fluidos.
-3. No inventes declaraciones ni datos ausentes en el original.
-4. Genera una meta descripción SEO atractiva de máximo 155 caracteres.
-5. Selecciona 4 a 6 palabras clave o etiquetas (keywords) relevantes incluyendo términos locales ("Saladillo", etc.).
+DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
+1. Redacta en auténtico español rioplatense periodístico (Argentina / Provincia de Buenos Aires), usando términos locales naturales y redacción bonaerense fluida, sin giros neutros o extranjeros.
+2. Redacta un título periodístico atractivo, claro, directo y optimizado para lectores digitales de Saladillo.
+3. Reestructura el cuerpo de la noticia: añade un primer párrafo de entrada (lead) potente con el qué, quién, cuándo y dónde. Organiza el desarrollo en párrafos legibles y fluidos.
+4. No inventes declaraciones ni datos ausentes en el original. Fidelidad absoluta a hechos, cifras y nombres propios.
+5. Genera una meta descripción SEO atractiva de máximo 155 caracteres.
+6. Selecciona 4 a 6 palabras clave o etiquetas (keywords) relevantes incluyendo términos locales ("Saladillo", etc.).
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{

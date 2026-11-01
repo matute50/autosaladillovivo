@@ -130,27 +130,24 @@ class AudioGeneratorAgent:
         return f"article_{article_id}_{file_hash}.mp3"
 
     def text_to_speech(self, text: str, language: str = 'es') -> Optional[bytes]:
-        """Convierte texto a audio.
+        """Convierte texto a audio con máxima fidelidad rioplatense (es-AR).
         Prioridad por defecto:
-        1. Google TTS (gTTS tld='com.ar' para entonación argentina).
-        2. Edge TTS (es-AR-TomasNeural) como respaldo.
+        1. Google TTS (gTTS) forzando el dominio nacional argentino (tld='com.ar') y endpoint directo es-AR.
+        2. Edge TTS (es-AR-TomasNeural) como respaldo rioplatense.
         3. API Externa TTS (si está configurada).
         """
-        # 1. Prioridad Principal: Google TTS (gTTS) con acento argentino
+        # 1. Prioridad Principal: Google TTS (gTTS) con acento y endpoint es-AR (Argentina)
         if HAS_GTTS:
-            for tld_option in ['com.ar', 'com', None]:
+            # Primero intentar con tld='com.ar' que dirige a Google Argentina
+            for tld_option in ['com.ar', 'com']:
                 try:
-                    if tld_option:
-                        tts = gTTS(text=text, lang=language, tld=tld_option, slow=False)
-                    else:
-                        tts = gTTS(text=text, lang=language, slow=False)
-
+                    tts = gTTS(text=text, lang='es', tld=tld_option, slow=False)
                     fp = io.BytesIO()
                     tts.write_to_fp(fp)
                     fp.seek(0)
                     data = fp.getvalue()
                     if len(data) > 1000:
-                        logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option})")
+                        logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option} - Argentina)")
                         return data
                 except Exception as e:
                     logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
