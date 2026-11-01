@@ -110,14 +110,18 @@ DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
 1. TÍTULO GANCHO (MÁXIMO 6 PALABRAS):
    - El título DEBE tener como MÁXIMO 6 PALABRAS (estrictamente entre 3 y 6 palabras).
    - Su objetivo principal es provocar intriga, impacto y curiosidad inmediata sobre la noticia para el lector que ve la foto en portada.
-   - Debe ser potente, directo y enérgico (ejemplos: "El insólito hallazgo en Saladillo", "Alerta total por las lluvias", "Millonaria inversión cambia la ciudad", "Histórico festejo sacude el centro").
-   - Prohibido exceder las 6 palabras. No usar títulos aburridos ni explicativos.
+   - Potente, directo y enérgico (ejemplos: "El insólito hallazgo en Saladillo", "Alerta total por las lluvias", "Millonaria inversión cambia la ciudad").
+   - Prohibido exceder las 6 palabras. Cero títulos burocráticos o aburridos.
 
-2. CUERPO DE LA NOTICIA:
-   - Redacta en auténtico español rioplatense bonaerense periodístico, fluido y natural.
-   - Primer párrafo de entrada (lead) con los datos esenciales (qué, quién, cuándo, dónde).
-   - Desarrollo en párrafos legibles y ordenados.
-   - Fidelidad absoluta a los hechos, nombres y cifras del original (cero inventos o alucinaciones).
+2. CUERPO DE LA NOTICIA (ADAPTADO PARA LOCUCIÓN EN GOOGLE TTS DE 35 A 45 SEGUNDOS):
+   - EXTENSIÓN EXACTA: Redacta un texto condensado de estrictamente entre 80 y 110 palabras (aproximadamente 500 a 680 caracteres). A velocidad normal de lectura en Google TTS (135 a 150 palabras por minuto), esta extensión garantiza exactamente entre 35 y 45 segundos de duración.
+   - RITMO Y PUNTUACIÓN RIOPLATENSE: Usa oraciones directas, ágiles y con comas bien ubicadas para generar las pausas y la respiración de un locutor de radio bonaerense.
+   - ACENTUACIÓN Y VOCABULARIO: Cuidar estrictamente la acentuación de las palabras según el uso en el español rioplatense (ej. "llegó", "inauguró", "destacó", "firmó", "continuará").
+   - NO REPETIR FRASES: Prohibido repetir ideas, frases o muletillas entre el inicio y el final. Cada oración debe aportar un dato nuevo y concreto.
+   - ESTRUCTURA RADIAL:
+     * Párrafo 1 (2-3 oraciones): El hecho principal y protagonistas (qué y quién en Saladillo).
+     * Párrafo 2 (2-3 oraciones): El impacto, detalles clave y cierre informativo.
+   - VERACIDAD: Fidelidad absoluta a nombres, lugares, fechas y cifras del original. Cero datos inventados.
 
 3. META DESCRIPCIÓN Y ETIQUETAS:
    - Meta descripción SEO concisa de máximo 155 caracteres.
@@ -126,7 +130,7 @@ DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
   "titulo_optimizado": "Título gancho de máx 6 palabras",
-  "contenido_optimizado": "Cuerpo completo de la noticia reestructurada en párrafos...",
+  "contenido_optimizado": "Cuerpo breve de 80 a 110 palabras listo para ser locutado...",
   "meta_description": "Resumen conciso para SEO...",
   "palabras_clave": ["Saladillo", "tema1", "tema2"]
 }}"""
@@ -264,7 +268,13 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             paragraphs = [content.strip() or clean_title]
 
         lead = paragraphs[0]
-        body = "\n\n".join(paragraphs[1:]) if len(paragraphs) > 1 else lead
+        # Acotar desarrollo para duración óptima en locución (80 a 110 palabras ~35-45s)
+        full_text = f"{lead} " + " ".join(paragraphs[1:])
+        text_words = full_text.split()
+        if len(text_words) > 105:
+            condensed_body = " ".join(text_words[:105]).rstrip(' ,;:') + "."
+        else:
+            condensed_body = full_text
 
         meta_desc = (lead[:150] + "...") if len(lead) > 150 else lead
 
@@ -277,7 +287,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 
         return {
             'titulo_optimizado': hook_title,
-            'contenido_optimizado': f"{lead}\n\n{body}".strip(),
+            'contenido_optimizado': condensed_body.strip(),
             'meta_description': meta_desc,
             'palabras_clave': keywords
         }
