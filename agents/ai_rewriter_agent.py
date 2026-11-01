@@ -106,6 +106,13 @@ TÍTULO ORIGINAL:
 CONTENIDO ORIGINAL:
 {content}
 
+FILTRO EDITORIAL REGIONAL ESTRICTO:
+"Saladillo Vivo" publica ÚNICAMENTE noticias locales (Saladillo, Del Carril, Cazón, Polvaredas, Álvarez de Toledo) y regionales (partidos vecinos: Roque Pérez, 25 de Mayo, General Alvear, Las Flores, Lobos, Tapalqué, interior bonaerense).
+Si el despacho corresponde a una noticia de orden NACIONAL o INTERNACIONAL sin anclaje local (ejemplos: política exterior o conflictos de otros países, inflación o economía nacional macro sin impacto local, fútbol de Primera División/AFA como Boca/River sin jugador local, lanzamientos comerciales de autos, farándula/espectáculos nacionales), DEBES RECHAZARLA respondiendo exactamente:
+{"es_local_regional": false, "motivo_rechazo": "Noticia nacional/internacional sin anclaje local"}
+
+Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumple las siguientes:
+
 DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
 
 1. TITULAR RADIAL (GANCHO DIRECTO DE HASTA 12 PALABRAS):
@@ -134,6 +141,7 @@ DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
+  "es_local_regional": true,
   "titulo_optimizado": "Titular radial corto y directo en presente (máximo 12 palabras)",
   "contenido_optimizado": "Texto radial breve de 80 a 110 palabras en voz activa...",
   "meta_description": "Resumen conciso para SEO...",
@@ -369,6 +377,18 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                     break
             except Exception as e:
                 print(f"    [!] Error con {prov['name']}: {e}")
+
+        # Si la IA determinó que es noticia nacional/internacional, descartar
+        if ai_result and ai_result.get('es_local_regional') is False:
+            print(f"    [AiRewriterAgent] Rechazado por orden nacional/internacional: \"{title[:50]}...\"")
+            return {
+                'es_local_regional': False,
+                'rejected': True,
+                'titulo_ia': None,
+                'contenido_ia': None,
+                'ai_provider': used_provider or 'IA Filter',
+                'modified_at': datetime.now().isoformat()
+            }
 
         # Si ningún proveedor externo funcionó, aplicar fallback local
         if not ai_result or not ai_result.get('titulo_optimizado'):

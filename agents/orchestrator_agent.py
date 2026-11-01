@@ -26,7 +26,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 
-from .scraper_agent import ScraperAgent
+from .scraper_agent import ScraperAgent, are_articles_duplicate
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
 from .audio_generator_agent import AudioGeneratorAgent
@@ -170,9 +170,33 @@ class OrchestratorAgent:
             # ------------------------------------------------------------------
             # PASO 2: GUARDAR EN BASE DE DATOS (BORRADOR)
             # ------------------------------------------------------------------
-            logger.info("💾 [PASO 2/6] StorageAgent: Guardando en Supabase como borrador preliminar...")
+            logger.info("💾 [PASO 2/6] StorageAgent: Verificando contra historial y guardando borradores...")
+            
+            # Cargar historial de artículos recientes para evitar republicar hechos ya tratados
+            recent_history = []
+            for h_file in ['modified_articles.json', 'scraped_articles.json']:
+                h_path = os.path.join(DATA_DIR, h_file)
+                if os.path.exists(h_path):
+                    try:
+                        with open(h_path, 'r', encoding='utf-8') as f:
+                            recent_history.extend(json.load(f)[:60])
+                    except Exception:
+                        pass
+
             articles_to_process = []
             for art in scraped_articles:
+                # Comprobar si ya existe en historial reciente
+                is_duplicate_published = False
+                for prev in recent_history:
+                    # Comparar solo si no es exactamente el mismo hash (el hash ya fue filtrado)
+                    if prev.get('title') and are_articles_duplicate(art, prev):
+                        is_duplicate_published = True
+                        logger.info(f"  [Deduplicación] Descartando '{art['title'][:50]}...': ya fue tratada en Saladillo Vivo.")
+                        break
+
+                if is_duplicate_published:
+                    continue
+
                 draft_record = self.storage_agent.save_draft(art)
                 if draft_record and draft_record.get('id'):
                     art['id'] = draft_record['id']
@@ -192,6 +216,9 @@ class OrchestratorAgent:
         modified_list = []
         for art in articles_to_process:
             ai_data = self.rewriter_agent.rewrite_article(art)
+            if ai_data.get('es_local_regional') is False or ai_data.get('rejected'):
+                logger.info(f"  [Orchestrator] Omitiendo noticia nacional/internacional rechazada: '{art.get('title', '')[:50]}'")
+                continue
             art.update(ai_data)
             modified_list.append(art)
             time.sleep(1.0)

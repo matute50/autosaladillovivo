@@ -49,6 +49,16 @@ except ImportError:
 # ==============================================================================
 # CONFIGURACIÓN DE FUENTES PARA SALADILLO
 # ==============================================================================
+COMMON_EXCLUDES = [
+    '/seccion/', '/tag/', '/category/', '/author/', '/page/',
+    '/feed/', '/contacto', '/quienes-somos', '/staff', '/politica-de-privacidad',
+    '/farmacias-de-turno', '/cdn-cgi/', '#', 'facebook.com', 'instagram.com',
+    'twitter.com', 'youtube.com', 'whatsapp.com', '/wp-content/',
+    '/nacionales/', '/internacionales/', '/el-pais/', '/el-mundo/', '/mundo/',
+    '/pais/', '/argentina/', '/espectaculos/', '/farandula/', '/autos/', '/motores/',
+    '/deportes-nacionales/'
+]
+
 SOURCES = {
     'abcsaladillo': {
         'name': 'ABC Saladillo',
@@ -56,11 +66,7 @@ SOURCES = {
         'base_url': 'https://www.abcsaladillo.com.ar',
         'domain': 'abcsaladillo.com.ar',
         'category': 'Local',
-        'exclude_paths': [
-            '/seccion/', '/farmacias-de-turno', '/contacto', '/quienes-somos',
-            '/cdn-cgi/', '#', 'facebook.com', 'instagram.com', 'twitter.com',
-            'youtube.com', 'whatsapp.com', '/tag/', '/page/', '/wp-content/'
-        ],
+        'exclude_paths': COMMON_EXCLUDES,
         'min_url_length': 35
     },
     'ahorasaladillo': {
@@ -69,11 +75,7 @@ SOURCES = {
         'base_url': 'https://ahorasaladillo-diariodigital.com.ar',
         'domain': 'ahorasaladillo-diariodigital.com.ar',
         'category': 'Local',
-        'exclude_paths': [
-            '/category/', '/tag/', '/author/', '/page/', '/wp-content/',
-            '/feed/', '/contacto', '/politica-de-privacidad', '#',
-            'facebook.com', 'instagram.com', 'twitter.com', 'youtube.com'
-        ],
+        'exclude_paths': COMMON_EXCLUDES,
         'min_url_length': 35
     },
     'infosaladillo': {
@@ -82,10 +84,8 @@ SOURCES = {
         'base_url': 'https://infosaladillo.com.ar',
         'domain': 'infosaladillo.com.ar',
         'category': 'Local',
-        'exclude_paths': [
-            '/seccion/', '/tag/', '/category/', '/author/', '/page/',
-            '/feed/', '/contacto', '/staff', '#', 'facebook.com',
-            'instagram.com', 'twitter.com', 'youtube.com', 'whatsapp.com'
+        'exclude_paths': COMMON_EXCLUDES + [
+            '/seccion/reflexiones/', '/reflexiones/', '/reflexion/', 'category-reflexiones'
         ],
         'min_url_length': 30
     }
@@ -351,6 +351,12 @@ def parse_article_data(url, source_name, category_default):
 
     title = clean_html_entities(title or "")
     if not title or len(title) < 10:
+        return None
+
+    # Filtro local/regional
+    from agents.scraper_agent import is_local_or_regional
+    is_loc, _ = is_local_or_regional(title, '', url)
+    if not is_loc:
         return None
 
     # 2. DESCRIPCIÓN / COPETE
