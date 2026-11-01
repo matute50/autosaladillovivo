@@ -92,7 +92,10 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
 
     const slideDuration = Math.max(duration || 35, 35);
 
-    // 1. Si la noticia tiene slide interactivo HTML
+    // 1. Al dar play a una noticia, establecer el volumen al 70% (0.7) y desmutear
+    setVolume(0.7);
+
+    // 2. Si la noticia tiene slide interactivo HTML
     if (isHtmlSlide && urlSlide) {
       playSlide({
         url: urlSlide,
@@ -121,7 +124,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
       duration: slideDuration
     };
 
-    playTemporaryVideo(mediaData, undefined, setVolume);
+    playTemporaryVideo(mediaData, 0.7, setVolume);
     scrollToPlayer();
   };
 

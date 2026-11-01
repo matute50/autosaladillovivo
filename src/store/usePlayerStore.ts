@@ -158,7 +158,7 @@ export const usePlayerStore = create<PlayerState>()(
                     set({ savedVideo: currentVideo, savedProgress: get().savedProgress });
                 }
 
-                set({ savedVolume: 0.2 });
+                set({ savedVolume: 0.7 });
 
                 const introToPlay = getRandomIntro();
                 set({

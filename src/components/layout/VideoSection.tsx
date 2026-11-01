@@ -146,6 +146,7 @@ const VideoSection: React.FC = () => {
   }, [currentVideo?.id]);
 
   const hasStartedAudioRef = useRef(false);
+  const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
 
   // DIAGNÓSTICO DE SLIDES
   useEffect(() => {
@@ -168,7 +169,11 @@ const VideoSection: React.FC = () => {
       pauseForSlide();
       hasStartedAudioRef.current = false; 
 
-      const duration = (typeof currentSlide === 'object' && currentSlide?.duration ? Math.max(currentSlide.duration, 35) : 35) * 1000;
+      // Duración dinámica: 100% de la duración del audio más 1s de margen natural
+      const effectiveAudioDuration = (audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0)
+        ? (audioDurationSec + 1)
+        : (typeof currentSlide === 'object' && currentSlide?.duration ? Math.max(currentSlide.duration, 35) : 40);
+      const duration = effectiveAudioDuration * 1000;
       const fadeOutDuration = 1000; // 1 segundo de fade out
       
       // Timer para el fade out
@@ -199,7 +204,7 @@ const VideoSection: React.FC = () => {
         clearTimeout(fadeOutTimer);
       };
     }
-  }, [isHtmlSlideActive, currentSlide?.url, stopSlide, resumeAfterSlide, pauseForSlide]);
+  }, [isHtmlSlideActive, currentSlide?.url, audioDurationSec, stopSlide, resumeAfterSlide, pauseForSlide]);
 
   // 2. Sincronización de Audio Centralizada (Inicia exactamente al terminar la presentación/intro de noticias)
   useEffect(() => {
@@ -232,6 +237,7 @@ const VideoSection: React.FC = () => {
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
     hasStartedAudioRef.current = false;
+    setAudioDurationSec(null);
   }, [currentSlide?.url]);
 
 
@@ -524,6 +530,18 @@ const VideoSection: React.FC = () => {
               preload="auto"
               crossOrigin="anonymous"
               playsInline
+              onLoadedMetadata={(e) => {
+                const el = e.currentTarget;
+                if (el.duration && isFinite(el.duration) && el.duration > 0) {
+                  setAudioDurationSec(el.duration);
+                }
+              }}
+              onEnded={() => {
+                if (isHtmlSlideActive || isNewsSlide || isNewsImageAudio) {
+                  stopSlide();
+                  resumeAfterSlide();
+                }
+              }}
               onError={(e) => console.error("Error reproduciendo audio:", e)}
             />
 
