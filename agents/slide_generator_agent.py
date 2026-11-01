@@ -299,7 +299,7 @@ class SlideGeneratorAgent:
             transform: scale(1.15);
         }
 
-        /* Foto principal nítida con animación Ken Burns continua ocupando el 100% */
+        /* Foto principal nítida con animación Ken Burns continua y ultra-suave ocupando el 100% */
         .photo-main {
             position: absolute;
             top: 0;
@@ -309,28 +309,28 @@ class SlideGeneratorAgent:
             object-fit: cover;
             object-position: center;
             will-change: transform;
-            animation: kenBurnsZoom 16s ease-in-out infinite alternate;
+            animation: kenBurnsZoom 20s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
         }
 
         .photo-slide:nth-child(2) .photo-main {
-            animation-duration: 20s;
-            animation-delay: -4s;
+            animation-duration: 24s;
+            animation-delay: -5s;
         }
 
         .photo-slide:nth-child(3) .photo-main {
-            animation-duration: 18s;
-            animation-delay: -8s;
+            animation-duration: 22s;
+            animation-delay: -10s;
         }
 
         @keyframes kenBurnsZoom {
             0% {
-                transform: scale(1.0);
+                transform: scale(1.0) translate(0%, 0%);
             }
             50% {
-                transform: scale(1.09);
+                transform: scale(1.065) translate(-0.8%, -0.5%);
             }
             100% {
-                transform: scale(1.0);
+                transform: scale(1.0) translate(0%, 0%);
             }
         }
     </style>

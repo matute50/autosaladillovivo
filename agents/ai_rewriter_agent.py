@@ -58,26 +58,40 @@ class AiRewriterAgent:
     def __init__(self):
         self.env = load_env_variables()
         self.providers = {
+            'gemini': {
+                'name': 'Google Gemini',
+                'url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+                'fallback_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+                'key': self.env.get('GEMINI_API_KEY') or self.env.get('GOOGLE_API_KEY') or self.env.get('NEXT_PUBLIC_GEMINI_API_KEY'),
+                'priority': 1
+            },
+            'groq': {
+                'name': 'Groq (Llama 3.3 70B)',
+                'url': 'https://api.groq.com/openai/v1/chat/completions',
+                'key': self.env.get('GROQ_API_KEY'),
+                'model': self.env.get('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+                'priority': 2
+            },
             'glm': {
                 'name': 'GLM (Zhipu AI)',
                 'url': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
                 'key': self.env.get('GLM_API_KEY') or self.env.get('ZHIPU_API_KEY'),
                 'model': self.env.get('GLM_MODEL', 'glm-4-flash'),
-                'priority': 1
+                'priority': 3
             },
-            'gemini': {
-                'name': 'Google Gemini',
-                'url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
-                'fallback_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
-                'key': self.env.get('GEMINI_API_KEY') or self.env.get('GOOGLE_API_KEY') or self.env.get('NEXT_PUBLIC_GEMINI_API_KEY'),
-                'priority': 2
+            'openrouter': {
+                'name': 'OpenRouter Free Tier',
+                'url': 'https://openrouter.ai/api/v1/chat/completions',
+                'key': self.env.get('OPENROUTER_API_KEY'),
+                'model': self.env.get('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free'),
+                'priority': 4
             },
             'openai': {
                 'name': 'OpenAI',
                 'url': 'https://api.openai.com/v1/chat/completions',
                 'key': self.env.get('OPENAI_API_KEY'),
                 'model': self.env.get('OPENAI_MODEL', 'gpt-4o-mini'),
-                'priority': 3
+                'priority': 5
             }
         }
 
@@ -126,7 +140,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         return None
 
     def _call_gemini(self, prompt, provider):
-        """Llamada a la API de Google Gemini."""
+        """Llamada a la API de Google Gemini (2.0 / 1.5 Flash)."""
         url = f"{provider['url']}?key={provider['key']}"
         data = {
             'contents': [{'parts': [{'text': prompt}]}],
@@ -142,6 +156,53 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             if candidates:
                 raw_text = candidates[0]['content']['parts'][0]['text']
                 return self._extract_json(raw_text)
+        elif provider.get('fallback_url'):
+            fallback_url = f"{provider['fallback_url']}?key={provider['key']}"
+            resp_fb = requests.post(fallback_url, json=data, timeout=35)
+            if resp_fb.status_code == 200:
+                candidates = resp_fb.json().get('candidates', [])
+                if candidates:
+                    raw_text = candidates[0]['content']['parts'][0]['text']
+                    return self._extract_json(raw_text)
+        return None
+
+    def _call_groq(self, prompt, provider):
+        """Llamada a la API de Groq (Llama 3.3 70B)."""
+        headers = {
+            'Authorization': f'Bearer {provider["key"]}',
+            'Content-Type': 'application/json'
+        }
+        data = {
+            'model': provider['model'],
+            'messages': [{'role': 'user', 'content': prompt}],
+            'temperature': 0.65,
+            'max_tokens': 1500,
+            'response_format': {'type': 'json_object'}
+        }
+        resp = requests.post(provider['url'], headers=headers, json=data, timeout=30)
+        if resp.status_code == 200:
+            content = resp.json()['choices'][0]['message']['content']
+            return self._extract_json(content)
+        return None
+
+    def _call_openrouter(self, prompt, provider):
+        """Llamada a OpenRouter (Modelos Free Tier)."""
+        headers = {
+            'Authorization': f'Bearer {provider["key"]}',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://saladillovivo.com.ar',
+            'X-Title': 'Saladillo Vivo Pro'
+        }
+        data = {
+            'model': provider['model'],
+            'messages': [{'role': 'user', 'content': prompt}],
+            'temperature': 0.65,
+            'max_tokens': 1500
+        }
+        resp = requests.post(provider['url'], headers=headers, json=data, timeout=35)
+        if resp.status_code == 200:
+            content = resp.json()['choices'][0]['message']['content']
+            return self._extract_json(content)
         return None
 
     def _call_openai(self, prompt, provider):
@@ -256,17 +317,22 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         ai_result = None
         used_provider = None
 
-        # Intentar según prioridad: GLM -> Gemini -> OpenAI
-        for prov_key in ['glm', 'gemini', 'openai']:
-            prov = self.providers[prov_key]
-            if not prov['key']:
+        # Intentar según prioridad Free-First: Gemini -> Groq -> GLM -> OpenRouter -> OpenAI
+        priorities = ['gemini', 'groq', 'glm', 'openrouter', 'openai']
+        for prov_key in priorities:
+            prov = self.providers.get(prov_key)
+            if not prov or not prov.get('key'):
                 continue
 
             try:
-                if prov_key == 'glm':
-                    ai_result = self._call_glm(prompt, prov)
-                elif prov_key == 'gemini':
+                if prov_key == 'gemini':
                     ai_result = self._call_gemini(prompt, prov)
+                elif prov_key == 'groq':
+                    ai_result = self._call_groq(prompt, prov)
+                elif prov_key == 'glm':
+                    ai_result = self._call_glm(prompt, prov)
+                elif prov_key == 'openrouter':
+                    ai_result = self._call_openrouter(prompt, prov)
                 elif prov_key == 'openai':
                     ai_result = self._call_openai(prompt, prov)
 

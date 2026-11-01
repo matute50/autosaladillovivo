@@ -51,6 +51,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 from .storage_agent import StorageAgent, load_env_credentials
+from .ai_rewriter_agent import load_env_variables
 
 logger = logging.getLogger("AudioGeneratorAgent")
 logger.setLevel(logging.INFO)
@@ -61,6 +62,7 @@ class AudioGeneratorAgent:
     Agente de generación y publicación de audios para noticias de Saladillo Vivo.
     """
     def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/audios", voice: str = "es-AR-TomasNeural"):
+        self.env = load_env_variables() if 'load_env_variables' in globals() else {}
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url).rstrip('/')
         self.supabase_key = supabase_key or env_key
@@ -68,6 +70,9 @@ class AudioGeneratorAgent:
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "audios"
         self.voice = voice  # es-AR-TomasNeural (Voz masculina español rioplatense argentina)
+        self.tts_api_key = self.env.get('TTS_API_KEY') or self.env.get('ELEVENLABS_API_KEY')
+        self.tts_voice_id = self.env.get('TTS_VOICE_ID')  # ID de voz personalizada externa si se configura
+        self.tts_api_url = self.env.get('TTS_API_URL', 'https://api.elevenlabs.io/v1/text-to-speech')
 
         self._ensure_storage_bucket()
 
@@ -125,7 +130,34 @@ class AudioGeneratorAgent:
         return f"article_{article_id}_{file_hash}.mp3"
 
     def text_to_speech(self, text: str, language: str = 'es') -> Optional[bytes]:
-        """Convierte texto a audio con auténtico acento rioplatense (es-AR) usando Edge TTS (o fallback gTTS)."""
+        """Convierte texto a audio con auténtico acento rioplatense (es-AR).
+        Prioridad: 1. API Externa TTS (si está configurada) -> 2. Edge TTS (es-AR-TomasNeural) -> 3. Fallback gTTS.
+        """
+        # 0. Prioridad Cero: API externa personalizada si se definió TTS_API_KEY
+        if self.tts_api_key and self.tts_voice_id and HAS_REQUESTS:
+            try:
+                headers = {
+                    "xi-api-key": self.tts_api_key,
+                    "Content-Type": "application/json"
+                }
+                url = f"{self.tts_api_url}/{self.tts_voice_id}"
+                data = {
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
+                    }
+                }
+                resp = requests.post(url, headers=headers, json=data, timeout=30)
+                if resp.status_code == 200 and len(resp.content) > 1000:
+                    logger.info("Audio sintetizado con éxito con API Externa TTS Rioplatense")
+                    return resp.content
+                else:
+                    logger.warning(f"Fallo en API Externa TTS (HTTP {resp.status_code}), activando fallback")
+            except Exception as e:
+                logger.warning(f"Error en llamada a API Externa TTS: {e}")
+
         # 1. Prioridad: Edge TTS con voz rioplatense (es-AR-ElenaNeural o es-AR-TomasNeural)
         if HAS_EDGE_TTS:
             try:

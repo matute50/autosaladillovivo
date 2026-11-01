@@ -156,16 +156,19 @@ def main():
     parser.add_argument('--no-audio', action='store_true', help='Desactivar generación automática de audio')
     parser.add_argument('--no-slides', action='store_true', help='Desactivar generación automática de slides interactivos')
 
+    parser.add_argument('--json-output', action='store_true', help='Emitir resumen del ciclo en formato JSON por stdout')
+
     args = parser.parse_args()
 
-    print("=================================================================")
-    print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS, AUDIO Y SLIDES")
-    print(f" Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f" Modo: {'Ejecución Única (--once)' if args.single_run else 'Servicio Continuo Automático'}")
-    print(f" Generación de audio: {'Desactivada (--no-audio)' if args.no_audio else 'Activada (gTTS + Pydub + Supabase Storage)'}")
-    print(f" Generación de slides: {'Desactivada (--no-slides)' if args.no_slides else 'Activada (Voz Rioplatense + Jinja2 + Slides Storage)'}")
-    print(f" Archivo de Log: {LOG_FILE}")
-    print("=================================================================")
+    if not args.json_output:
+        print("=================================================================")
+        print(" SALADILLO VIVO — SISTEMA MULTI-AGENTE DE NOTICIAS, AUDIO Y SLIDES")
+        print(f" Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f" Modo: {'Ejecución Única (--once)' if args.single_run else 'Servicio Continuo Automático'}")
+        print(f" Generación de audio: {'Desactivada (--no-audio)' if args.no_audio else 'Activada (Edge-TTS / gTTS + Pydub + Supabase Storage)'}")
+        print(f" Generación de slides: {'Desactivada (--no-slides)' if args.no_slides else 'Activada (Zoom Suave Ken Burns + Slides Storage)'}")
+        print(f" Archivo de Log: {LOG_FILE}")
+        print("=================================================================")
 
     automation = NewsAutomationSystem(
         limit_per_source=args.limit,
@@ -177,7 +180,32 @@ def main():
 
     if args.single_run:
         success = automation.execute_full_pipeline()
-        sys.exit(0 if success else 1)
+        summary_path = os.path.join(DATA_DIR, 'cycle_summary.json')
+        summary = {}
+        if os.path.exists(summary_path):
+            try:
+                with open(summary_path, 'r', encoding='utf-8') as f:
+                    summary = json.load(f)
+            except Exception:
+                pass
+
+        if args.json_output:
+            print(json.dumps({
+                "status": "success" if success else "error",
+                "timestamp": datetime.now().isoformat(),
+                "summary": summary
+            }, ensure_ascii=False))
+
+        # Códigos semánticos para Hermes:
+        # 0: Éxito con noticias publicadas
+        # 2: Sin noticias nuevas en este ciclo (no requiere reintento)
+        # 1: Fallo crítico
+        if not success:
+            sys.exit(1)
+        elif summary.get('scraped_count', 0) == 0 or summary.get('published_count', 0) == 0:
+            sys.exit(2)
+        else:
+            sys.exit(0)
 
     def handle_signal(sig, frame):
         automation.stop_automation()
