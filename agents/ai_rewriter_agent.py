@@ -107,16 +107,25 @@ CONTENIDO ORIGINAL:
 {content}
 
 DIRECTIVAS EDITORIALES Y DE ESTILO RIOPLATENSE (BONAERENSE):
-1. Redacta en auténtico español rioplatense periodístico (Argentina / Provincia de Buenos Aires), usando términos locales naturales y redacción bonaerense fluida, sin giros neutros o extranjeros.
-2. Redacta un título periodístico atractivo, claro, directo y optimizado para lectores digitales de Saladillo.
-3. Reestructura el cuerpo de la noticia: añade un primer párrafo de entrada (lead) potente con el qué, quién, cuándo y dónde. Organiza el desarrollo en párrafos legibles y fluidos.
-4. No inventes declaraciones ni datos ausentes en el original. Fidelidad absoluta a hechos, cifras y nombres propios.
-5. Genera una meta descripción SEO atractiva de máximo 155 caracteres.
-6. Selecciona 4 a 6 palabras clave o etiquetas (keywords) relevantes incluyendo términos locales ("Saladillo", etc.).
+1. TÍTULO GANCHO (MÁXIMO 6 PALABRAS):
+   - El título DEBE tener como MÁXIMO 6 PALABRAS (estrictamente entre 3 y 6 palabras).
+   - Su objetivo principal es provocar intriga, impacto y curiosidad inmediata sobre la noticia para el lector que ve la foto en portada.
+   - Debe ser potente, directo y enérgico (ejemplos: "El insólito hallazgo en Saladillo", "Alerta total por las lluvias", "Millonaria inversión cambia la ciudad", "Histórico festejo sacude el centro").
+   - Prohibido exceder las 6 palabras. No usar títulos aburridos ni explicativos.
+
+2. CUERPO DE LA NOTICIA:
+   - Redacta en auténtico español rioplatense bonaerense periodístico, fluido y natural.
+   - Primer párrafo de entrada (lead) con los datos esenciales (qué, quién, cuándo, dónde).
+   - Desarrollo en párrafos legibles y ordenados.
+   - Fidelidad absoluta a los hechos, nombres y cifras del original (cero inventos o alucinaciones).
+
+3. META DESCRIPCIÓN Y ETIQUETAS:
+   - Meta descripción SEO concisa de máximo 155 caracteres.
+   - 4 a 6 palabras clave locales ("Saladillo", etc.).
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
-  "titulo_optimizado": "Título profesional aquí",
+  "titulo_optimizado": "Título gancho de máx 6 palabras",
   "contenido_optimizado": "Cuerpo completo de la noticia reestructurada en párrafos...",
   "meta_description": "Resumen conciso para SEO...",
   "palabras_clave": ["Saladillo", "tema1", "tema2"]
@@ -240,13 +249,15 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
     def local_heuristic_fallback(self, title, content):
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
-        Reestructura el texto con reglas de estilo periodístico de Saladillo Vivo.
+        Reestructura el texto con reglas de estilo periodístico de Saladillo Vivo y título gancho de máx 6 palabras.
         """
-        # Limpiar y jerarquizar título
+        # Limpiar y condensar a título gancho de máximo 6 palabras
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
-        if not clean_title.lower().startswith(('en saladillo', 'saladillo:')):
-            if 'saladillo' not in clean_title.lower():
-                clean_title = f"Saladillo: {clean_title}"
+        words = clean_title.split()
+        if len(words) > 6:
+            hook_title = " ".join(words[:6]).rstrip(' ,.:;')
+        else:
+            hook_title = clean_title
 
         paragraphs = [p.strip() for p in content.split('\n') if len(p.strip()) > 30]
         if not paragraphs:
@@ -259,13 +270,13 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 
         # Keywords locales
         keywords = ["Saladillo", "Saladillo Vivo", "Noticias Locales", "Provincia de Buenos Aires"]
-        words = re.findall(r'\b[A-ZÁÉÍÓÚ][a-záéíóú]{4,}\b', content)
-        for w in words[:4]:
+        words_found = re.findall(r'\b[A-ZÁÉÍÓÚ][a-záéíóú]{4,}\b', content)
+        for w in words_found[:4]:
             if w not in keywords:
                 keywords.append(w)
 
         return {
-            'titulo_optimizado': clean_title,
+            'titulo_optimizado': hook_title,
             'contenido_optimizado': f"{lead}\n\n{body}".strip(),
             'meta_description': meta_desc,
             'palabras_clave': keywords
