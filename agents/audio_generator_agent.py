@@ -19,6 +19,7 @@ import sys
 import io
 import re
 import time
+import random
 import hashlib
 import logging
 import asyncio
@@ -55,6 +56,42 @@ from .ai_rewriter_agent import load_env_variables
 
 logger = logging.getLogger("AudioGeneratorAgent")
 logger.setLevel(logging.INFO)
+
+
+# Frases institucionales de cierre elegidas al azar
+INSTITUTIONAL_CLOSING_PHRASES = [
+    "En Saladillo Vivo. Dale play a la noticia.",
+    "No lo leas, escuchálo, en Saladillo Vivo.",
+    "Saladillo Vivo le pone voz a las noticias.",
+    "Escuchá más, en Saladillo Vivo.",
+    "Seguí escuchando, en Saladillo Vivo.",
+    "La ciudad se escucha, en Saladillo Vivo.",
+    "Enteráte escuchando, en Saladillo Vivo.",
+    "Más info, en voz alta, en Saladillo Vivo.",
+    "Saladillo Vivo. Menos textos, más audios.",
+    "Cerrá los ojos, y escuchá Saladillo Vivo.",
+    "Pasáte al audio, en Saladillo Vivo.",
+    "Saladillo Vivo. Escuchar es la nueva forma de informarte.",
+    "Poné play a tu día, en Saladillo Vivo.",
+    "Dejános contarte la noticia, solo en Saladillo Vivo.",
+    "Escuchálo ahora, en Saladillo Vivo.",
+    "Todo suena mejor, en Saladillo Vivo.",
+    "Viví la noticia, en Saladillo Vivo.",
+    "Sentí Saladillo, en Saladillo Vivo.",
+    "Saladillo Vivo. La voz de la ciudad.",
+    "Informáte al instante, en Saladillo Vivo.",
+    "Saladillo Vivo. Un paso adelante.",
+    "Saladillo Vivo. La evolución de la noticia.",
+    "Escuchá el futuro, en Saladillo Vivo.",
+    "Saladillo Vivo. Innovación en noticias.",
+    "Siempre un paso adelante, en Saladillo Vivo.",
+    "Los demás leen, nosotros te lo contamos. Solo en Saladillo Vivo.",
+    "Adelantáte a todos escuchando en Saladillo Vivo.",
+    "La nueva era de la info, en Saladillo Vivo.",
+    "Innovamos para que solo escuches. Solo en Saladillo Vivo.",
+    "Saladillo Vivo. Un paso más allá de la lectura.",
+    "Saladillo Vivo. Un paso más allá que leer las noticias."
+]
 
 
 class AudioGeneratorAgent:
@@ -122,6 +159,10 @@ class AudioGeneratorAgent:
         clean = re.sub(r'[^\w\s\.,;:¡!¿?\-\'\"áéíóúÁÉÍÓÚñÑ]', '', clean)
         return clean.strip()
 
+    def get_random_closing_phrase(self) -> str:
+        """Selecciona al azar una frase de cierre institucional para la noticia."""
+        return random.choice(INSTITUTIONAL_CLOSING_PHRASES)
+
     def generate_audio_filename(self, article_id: Union[int, str], title: str) -> str:
         """Genera un nombre de archivo único y predecible para el audio."""
         clean_title = re.sub(r'[^\w\-]', '_', title)[:40].strip('_')
@@ -129,7 +170,7 @@ class AudioGeneratorAgent:
         file_hash = hashlib.md5(hash_input.encode('utf-8')).hexdigest()[:8]
         return f"article_{article_id}_{file_hash}.mp3"
 
-    def text_to_speech(self, text: str, language: str = 'es') -> Optional[bytes]:
+    def text_to_speech(self, text: str, language: str = 'es', institutional_tone: bool = False) -> Optional[bytes]:
         """Convierte texto a audio con máxima fidelidad rioplatense (es-AR).
         Prioridad por defecto:
         1. Google TTS (gTTS) forzando el dominio nacional argentino (tld='com.ar') y endpoint directo es-AR.
@@ -156,7 +197,8 @@ class AudioGeneratorAgent:
         if HAS_EDGE_TTS:
             try:
                 async def _synthesize():
-                    comm = edge_tts.Communicate(text, self.voice)
+                    rate_param = "-4%" if institutional_tone else "+0%"
+                    comm = edge_tts.Communicate(text, self.voice, rate=rate_param)
                     audio_data = bytearray()
                     async for chunk in comm.stream():
                         if chunk.get("type") == "audio":
@@ -297,13 +339,45 @@ class AudioGeneratorAgent:
 
         print(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(full_speech)}")
 
-        # 1. Síntesis de voz
-        audio_bytes = self.text_to_speech(full_speech)
+        # Elegir frase de cierre institucional al azar
+        closing_phrase = self.get_random_closing_phrase()
+        print(f"  [AudioGeneratorAgent] Frase institucional de cierre: \"{closing_phrase}\"")
+
+        # 1. Síntesis de voz con pausa de 1 segundo antes del cierre institucional
+        audio_bytes = None
+        if HAS_PYDUB:
+            try:
+                # Síntesis del despacho noticioso
+                news_bytes = self.text_to_speech(full_speech, institutional_tone=False)
+                # Síntesis de la frase institucional
+                closing_bytes = self.text_to_speech(closing_phrase, institutional_tone=True)
+
+                if news_bytes and closing_bytes:
+                    seg_news = AudioSegment.from_file(io.BytesIO(news_bytes), format="mp3")
+                    seg_closing = AudioSegment.from_file(io.BytesIO(closing_bytes), format="mp3")
+                    # Silencio de exactamente 1 segundo (1000 ms)
+                    silence_1s = AudioSegment.silent(duration=1000)
+
+                    # Ensamblar audio completo: Noticia + 1s silencio + Cierre institucional
+                    combined_audio = seg_news + silence_1s + seg_closing
+                    buf_combined = io.BytesIO()
+                    combined_audio.export(buf_combined, format="mp3", bitrate="128k")
+                    audio_bytes = buf_combined.getvalue()
+                    logger.info(f"Audio ensamblado con éxito: Noticia ({len(seg_news)/1000:.1f}s) + Silencio (1.0s) + Cierre ({len(seg_closing)/1000:.1f}s)")
+            except Exception as e:
+                logger.warning(f"Error combinando segmentos de audio con pydub ({e}). Aplicando fallback.")
+
+        # Fallback si Pydub no está disponible o falló
+        if not audio_bytes:
+            # Pausa con puntos suspensivos para generar el silencio
+            full_speech_with_closing = f"{full_speech}. ... ... {closing_phrase}"
+            audio_bytes = self.text_to_speech(full_speech_with_closing)
+
         if not audio_bytes:
             logger.error(f"Fallo al generar TTS para artículo {article_id}.")
             return None
 
-        # 2. Optimización acústica
+        # 2. Optimización acústica (normalización sonora y filtrado)
         optimized_audio = self.optimize_audio(audio_bytes)
 
         # 3. Nombre de archivo único
