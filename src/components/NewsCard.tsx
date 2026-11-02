@@ -11,7 +11,6 @@ import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/store/usePlayerStore';
 import { useVolumeStore } from '@/store/useVolumeStore';
 
-// 1. CORRECCIÓN CLAVE: Aseguramos que la interfaz acepte 'onCardClick'
 interface NewsCardProps {
   newsItem: any;
   index?: number;
@@ -31,7 +30,6 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   const rawTitle = newsItem.title || newsItem.titulo;
   const title = rawTitle ? rawTitle.replace(/\|/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase() : '';
 
-  
   const getProcessedImageUrl = (inputUrl: string | undefined | null): string => {
       if (!inputUrl) return '/placeholder.png';
       
@@ -59,8 +57,6 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   const isHtmlSlide = hasSlide && (urlSlide.includes('.html') || urlSlide.includes('/slides/'));
   const hasAudioImage = !!finalImageUrl && !!audioUrl;
   const isPlayable = hasSlide || hasAudioImage;
-
-
 
   const scrollToPlayer = () => {
     if (typeof window !== 'undefined') {
@@ -129,7 +125,68 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   };
 
   const priority = index < 4;
-  const titleSizeClass = isFeatured ? 'text-2xl md:text-3xl' : 'text-base md:text-lg';
+
+  // Tipografía responsiva adaptativa según tipo de tarjeta y longitud del título para que aparezca completo sobre la imagen
+  const getResponsiveTypography = (text: string, featured: boolean) => {
+    const len = text.length;
+
+    if (featured) {
+      if (len > 100) {
+        return {
+          fontSize: 'clamp(0.85rem, 2.7cqw, 1.25rem)',
+          lineHeight: '1.18',
+          className: 'text-xs sm:text-sm md:text-base lg:text-lg',
+        };
+      } else if (len > 70) {
+        return {
+          fontSize: 'clamp(0.95rem, 3.3cqw, 1.5rem)',
+          lineHeight: '1.2',
+          className: 'text-sm sm:text-base md:text-lg lg:text-xl',
+        };
+      } else if (len > 40) {
+        return {
+          fontSize: 'clamp(1.1rem, 3.8cqw, 1.75rem)',
+          lineHeight: '1.25',
+          className: 'text-base sm:text-lg md:text-xl lg:text-2xl',
+        };
+      } else {
+        return {
+          fontSize: 'clamp(1.25rem, 4.5cqw, 2.25rem)',
+          lineHeight: '1.25',
+          className: 'text-lg sm:text-xl md:text-2xl lg:text-3xl',
+        };
+      }
+    }
+
+    // Tarjetas estándar (grid, carrusel, columnas)
+    if (len > 100) {
+      return {
+        fontSize: 'clamp(0.68rem, 3.2cqw, 0.85rem)',
+        lineHeight: '1.16',
+        className: 'text-[10px] sm:text-[11px] md:text-xs',
+      };
+    } else if (len > 70) {
+      return {
+        fontSize: 'clamp(0.75rem, 3.6cqw, 0.95rem)',
+        lineHeight: '1.18',
+        className: 'text-[11px] sm:text-xs md:text-sm',
+      };
+    } else if (len > 40) {
+      return {
+        fontSize: 'clamp(0.82rem, 4.1cqw, 1.05rem)',
+        lineHeight: '1.2',
+        className: 'text-xs sm:text-sm md:text-base',
+      };
+    } else {
+      return {
+        fontSize: 'clamp(0.9rem, 4.6cqw, 1.15rem)',
+        lineHeight: '1.25',
+        className: 'text-sm sm:text-base md:text-lg',
+      };
+    }
+  };
+
+  const typography = getResponsiveTypography(title, isFeatured);
 
   return (
     <motion.article
@@ -145,7 +202,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
       )}
       onClick={handlePlaySlide} 
     >
-      <div className="relative w-full h-full aspect-video overflow-hidden bg-black border-0">
+      <div className="relative w-full h-full aspect-video overflow-hidden bg-black border-0 [container-type:inline-size]">
         <Image
           src={finalImageUrl}
           alt={title || 'Noticia'}
@@ -157,8 +214,8 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
         />
         {/* Viñeta Negra Intensificada sin blur sobre la imagen */}
         <div className="absolute inset-0 z-10 pointer-events-none bg-black/10 [mask-image:radial-gradient(circle,transparent_30%,black_100%)] shadow-[inset_0_0_100px_rgba(0,0,0,0.8)]" />
-        <div className="absolute inset-x-0 top-0 h-[50%] bg-gradient-to-b from-black/95 via-black/50 to-transparent opacity-100 z-10 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent opacity-90 z-20" />
+        <div className="absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-black/95 via-black/50 to-transparent opacity-100 z-10 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent opacity-95 z-20 pointer-events-none" />
 
         {createdAt && (
           <div className="absolute top-3 left-3 z-30">
@@ -168,10 +225,23 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
           </div>
         )}
 
-        <div className="absolute bottom-0 left-0 w-full p-4 pr-12 z-30"> {/* pr-12 para dejar espacio al icono play */}
-            <h3 className={`font-bold ${titleSizeClass} text-white leading-tight drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] group-hover:text-blue-200 transition-colors line-clamp-3`}>
-              {title}
-            </h3>
+        {/* Título responsivo sobre la imagen que se muestra completo */}
+        <div className={cn(
+          "absolute bottom-0 left-0 w-full z-30 flex flex-col justify-end max-h-[82%]",
+          isFeatured ? "p-3 sm:p-4 md:p-5 pr-14 sm:pr-16" : "p-2 sm:p-2.5 md:p-3 pr-10 sm:pr-12"
+        )}>
+          <h3
+            style={{
+              fontSize: typography.fontSize,
+              lineHeight: typography.lineHeight
+            }}
+            className={cn(
+              "font-bold text-white tracking-normal drop-shadow-[0_2px_3px_rgba(0,0,0,0.95)] group-hover:text-blue-200 transition-colors break-words",
+              typography.className
+            )}
+          >
+            {title}
+          </h3>
         </div>
 
         {/* Indicador de Play sutil en esquina inferior derecha */}

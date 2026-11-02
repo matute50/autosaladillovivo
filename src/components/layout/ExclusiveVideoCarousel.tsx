@@ -11,6 +11,7 @@ import { usePlayerStore } from '@/store/usePlayerStore';
 import { useVolumeStore } from '@/store/useVolumeStore';
 import { useThemeButtonColors } from '@/hooks/useThemeButtonColors';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 import { Video, ExclusiveVideoCarouselProps } from '@/lib/types';
 
 const ExclusiveVideoCarousel: React.FC<ExclusiveVideoCarouselProps> = ({ videos, isLoading, carouselId, isLive = false, onVideoClick }) => {
@@ -161,7 +162,10 @@ const ExclusiveVideoCarousel: React.FC<ExclusiveVideoCarouselProps> = ({ videos,
                   }} 
                 />
                 <div className={titleOverlayClasses}>
-                  <p className="text-white font-thin uppercase leading-tight text-xs">{video.nombre}</p>
+                  <p className={cn(
+                    "text-white font-thin uppercase leading-tight break-words",
+                    (video.nombre || '').length > 70 ? "text-[10px]" : ((video.nombre || '').length > 40 ? "text-[11px]" : "text-xs")
+                  )}>{video.nombre}</p>
                 </div>
               </div>
             </SwiperSlide>

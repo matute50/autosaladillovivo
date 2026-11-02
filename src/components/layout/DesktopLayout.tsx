@@ -7,7 +7,7 @@ const AdsSection = dynamic(() => import('./AdsSection'), { ssr: false });
 const VideoSection = dynamic(() => import('./VideoSection'), { ssr: false });
 const NewsTicker = dynamic(() => import('../NewsTicker'), { ssr: false });
 
-import type { PageData, Video } from '@/lib/types';
+import type { PageData, Video, Article } from '@/lib/types';
 import CategoryCycler from './CategoryCycler';
 import { categoryMappings, type CategoryMapping } from '@/lib/categoryMappings';
 import { useNewsStore } from '@/store/useNewsStore';
