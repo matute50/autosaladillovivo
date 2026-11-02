@@ -38,8 +38,22 @@ except ImportError:
     HAS_REQUESTS = False
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageOps
     HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 except ImportError:
     HAS_PIL = False
 
@@ -68,6 +82,134 @@ logger.setLevel(logging.INFO)
 
 
 class SlideGeneratorAgent:
+    def detect_attention_center(self, image_bytes: bytes):
+        """
+        Determina el centro de atención de la imagen utilizando visión por computadora:
+        - Si hay 1 persona: rostro de la persona (altura de los ojos).
+        - Si hay más de 1 persona: punto medio equidistante entre todos los rostros.
+        - Si es un objeto, vehículo o animal: centroide del cuerpo u objeto principal por saliencia.
+        - Fallback editorial: (50.0, 45.0) proporción áurea.
+        Retorna (focal_x_pct, focal_y_pct, method_desc).
+        """
+        if not HAS_CV2 or not HAS_NUMPY:
+            return 50.0, 45.0, "fallback_sin_cv"
+
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img_bgr is None:
+                return 50.0, 45.0, "error_decodificacion"
+
+            h, w = img_bgr.shape[:2]
+            gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+            # 1. Detección de rostros humanos (frontal)
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+
+            if len(faces) == 1:
+                x, y, fw, fh = faces[0]
+                cx = (x + fw / 2.0) / w * 100.0
+                cy = (y + fh * 0.45) / h * 100.0
+                self.logger.info(f"Centro de atención: 1 rostro en ({cx:.1f}%, {cy:.1f}%)")
+                return round(float(cx), 1), round(float(cy), 1), "rostro_persona"
+
+            elif len(faces) > 1:
+                # Punto medio equidistante entre todos los rostros detectados
+                avg_x = sum((x + fw / 2.0) for (x, y, fw, fh) in faces) / len(faces)
+                avg_y = sum((y + fh * 0.45) for (x, y, fw, fh) in faces) / len(faces)
+                cx = (avg_x / w) * 100.0
+                cy = (avg_y / h) * 100.0
+                self.logger.info(f"Centro de atención: {len(faces)} rostros equidistante en ({cx:.1f}%, {cy:.1f}%)")
+                return round(float(cx), 1), round(float(cy), 1), f"equidistante_{len(faces)}_personas"
+
+            # 2. Detección de objeto / animal / sujeto principal mediante saliencia y contornos
+            blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+            edges = cv2.Canny(blurred, 45, 140)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            dilated = cv2.dilate(edges, kernel, iterations=2)
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if contours:
+                min_area = 0.025 * w * h
+                valid = [c for c in contours if cv2.contourArea(c) > min_area]
+                if valid:
+                    largest = max(valid, key=cv2.contourArea)
+                    M = cv2.moments(largest)
+                    if M["m00"] != 0:
+                        obj_x = (M["m10"] / M["m00"]) / w * 100.0
+                        obj_y = (M["m01"] / M["m00"]) / h * 100.0
+                        self.logger.info(f"Centro de atención: objeto/animal saliente en ({obj_x:.1f}%, {obj_y:.1f}%)")
+                        return round(float(obj_x), 1), round(float(obj_y), 1), "objeto_animal_saliencia"
+
+        except Exception as e:
+            self.logger.warning(f"Excepción detectando centro de atención: {e}")
+
+        return 50.0, 45.0, "centro_editorial"
+
+    def enhance_image_ai(self, image_bytes: bytes) -> bytes:
+        """
+        Mejora automáticamente brillo, contraste e intensidad (saturación) con perfil cinematográfico TV.
+        """
+        if not HAS_PIL:
+            return image_bytes
+
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # 1. Autocontraste suave para estirar el rango dinámico
+            img = ImageOps.autocontrast(img, cutoff=0.3)
+
+            # 2. Brillo adaptativo basado en luminancia media
+            if HAS_NUMPY:
+                gray = img.convert('L')
+                mean_lum = float(np.mean(np.array(gray)))
+                if mean_lum < 85:
+                    b_factor = 1.18  # Foto oscura: realce limpio
+                elif mean_lum < 115:
+                    b_factor = 1.08  # Foto algo apagada
+                elif mean_lum > 185:
+                    b_factor = 0.96  # Foto sobreexpuesta
+                else:
+                    b_factor = 1.03
+            else:
+                b_factor = 1.05
+
+            img = ImageEnhance.Brightness(img).enhance(b_factor)
+
+            # 3. Contraste cinematográfico (+10%)
+            img = ImageEnhance.Contrast(img).enhance(1.10)
+
+            # 4. Intensidad de color / saturación (+18% para impacto visual en pantallas)
+            img = ImageEnhance.Color(img).enhance(1.18)
+
+            # 5. Nitidez sutil para contornos definidos (+12%)
+            img = ImageEnhance.Sharpness(img).enhance(1.12)
+
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=88, optimize=True)
+            return buf.getvalue()
+
+        except Exception as e:
+            self.logger.warning(f"Error en mejora de imagen: {e}")
+            return image_bytes
+
+    def upload_image_to_supabase(self, image_bytes: bytes, filename: str) -> Optional[str]:
+        """Sube una imagen optimizada al bucket 'slides' de Supabase Storage."""
+        if not HAS_REQUESTS or not self.supabase_key:
+            return None
+        try:
+            upload_url = f"{self.supabase_url}/storage/v1/object/{self.bucket_name}/{filename}"
+            headers = self._get_storage_headers("image/jpeg")
+            resp = requests.post(upload_url, headers=headers, data=image_bytes, timeout=25)
+            if resp.status_code in (200, 201):
+                return f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{filename}"
+        except Exception as e:
+            self.logger.warning(f"No se pudo subir imagen optimizada {filename}: {e}")
+        return None
+
     """
     Agente de generación de slides interactivos con voz rioplatense para Saladillo Vivo.
     """
@@ -185,53 +327,61 @@ class SlideGeneratorAgent:
 
         return None
 
-    def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[str]:
+    def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
         """
-        Procesa y optimiza imágenes para el slide.
-        Retorna las URLs utilizables en el slide HTML.
+        Procesa, analiza y optimiza imágenes para el slide:
+        1. Determina centro de atención (rostro único, punto medio de rostros, o cuerpo/objeto).
+        2. Aplica mejora automática de brillo, contraste e intensidad de color.
+        3. Aloja la versión optimizada en Supabase Storage.
+        Retorna una lista de diccionarios con URL, coordenadas focales (focal_x, focal_y) y método.
         """
-        processed_images: List[str] = []
+        processed_images: List[Dict] = []
 
         if not image_urls:
-            return ["https://saladillovivo.vercel.app/default-og-image.png"]
+            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
 
         for i, image_url in enumerate(image_urls):
             if not image_url:
                 continue
 
-            # Si es una URL web válida
             if image_url.startswith("http://") or image_url.startswith("https://"):
                 try:
-                    if HAS_PIL and HAS_REQUESTS:
-                        # Validar/optimizar imagen
-                        resp = requests.get(image_url, timeout=10)
+                    if HAS_REQUESTS:
+                        resp = requests.get(image_url, timeout=12, headers={'User-Agent': 'Mozilla/5.0'})
                         if resp.status_code == 200:
-                            img = Image.open(io.BytesIO(resp.content))
-                            # Convertir a RGB si viene en RGBA o P
-                            if img.mode in ('RGBA', 'LA', 'P'):
-                                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                                if img.mode == 'P':
-                                    img = img.convert('RGBA')
-                                rgb_img.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
-                                img = rgb_img
+                            raw_bytes = resp.content
 
-                            # Redimensionar para formato web
-                            max_width, max_height = 1200, 800
-                            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+                            # 1. Determinar centro de atención con visión artificial
+                            focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
 
-                            # Guardar copia local temporal de respaldo
-                            temp_image_path = self.storage_path / f"temp_article_{article_id}_img_{i}.jpg"
-                            img.save(temp_image_path, format='JPEG', quality=85, optimize=True)
+                            # 2. Mejorar brillo, contraste e intensidad automáticamente
+                            enhanced_bytes = self.enhance_image_ai(raw_bytes)
 
-                    # Añadir la URL accesible para el slide
-                    processed_images.append(image_url)
+                            # 3. Subir imagen mejorada a Supabase Storage
+                            img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
+                            filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
+                            uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
+                            final_url = uploaded_url or image_url
+
+                            processed_images.append({
+                                "url": final_url,
+                                "focal_x": focal_x,
+                                "focal_y": focal_y,
+                                "method": method
+                            })
+                            continue
+
                 except Exception as e:
                     self.logger.warning(f"Error procesando imagen {i} para artículo {article_id}: {e}")
-                    processed_images.append(image_url)
-            else:
-                processed_images.append(image_url)
 
-        return processed_images if processed_images else ["https://saladillovivo.vercel.app/default-og-image.png"]
+            processed_images.append({
+                "url": image_url,
+                "focal_x": 50.0,
+                "focal_y": 45.0,
+                "method": "fallback"
+            })
+
+        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
                           audio_url: str, images: List[str]) -> str:
@@ -299,7 +449,7 @@ class SlideGeneratorAgent:
             transform: scale(1.15);
         }
 
-        /* Foto principal nítida con animación Ken Burns continua y ultra-suave ocupando el 100% */
+        /* Foto principal nítida con animación Ken Burns centrada en el punto de atención */
         .photo-main {
             position: absolute;
             top: 0;
@@ -307,30 +457,29 @@ class SlideGeneratorAgent:
             width: 100%;
             height: 100%;
             object-fit: cover;
-            object-position: center;
             will-change: transform;
-            animation: kenBurnsZoom 20s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+            animation: kenBurnsZoom 18s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
         }
 
         .photo-slide:nth-child(2) .photo-main {
-            animation-duration: 24s;
-            animation-delay: -5s;
+            animation-duration: 21s;
+            animation-delay: -4s;
         }
 
         .photo-slide:nth-child(3) .photo-main {
-            animation-duration: 22s;
-            animation-delay: -10s;
+            animation-duration: 23s;
+            animation-delay: -8s;
         }
 
         @keyframes kenBurnsZoom {
             0% {
-                transform: scale(1.0) translate(0%, 0%);
+                transform: scale(1.0);
             }
             50% {
-                transform: scale(1.065) translate(-0.8%, -0.5%);
+                transform: scale(1.18);
             }
             100% {
-                transform: scale(1.0) translate(0%, 0%);
+                transform: scale(1.0);
             }
         }
     </style>
@@ -339,8 +488,10 @@ class SlideGeneratorAgent:
     <div class="fullscreen-container" id="slideshowContainer">
         {% for img in images %}
         <div class="photo-slide {% if loop.first %}active{% endif %}">
-            <div class="photo-backdrop" style="background-image: url('{{ img }}');"></div>
-            <img src="{{ img }}" alt="" class="photo-main" onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
+            <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
+            <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
+                 style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
+                 onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
         {% endfor %}
     </div>
@@ -375,7 +526,12 @@ class SlideGeneratorAgent:
             )
         else:
             # Fallback simple sin jinja2
+            first_img = images[0] if images else {"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50, "focal_y": 45}
+            img_url = first_img.get("url", first_img) if isinstance(first_img, dict) else first_img
+            fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
+            fy = first_img.get("focal_y", 45) if isinstance(first_img, dict) else 45
             html = template_str.replace("{{ title }}", title).replace("{{ text }}", text).replace("{{ audio_url }}", audio_url or "")
+            html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
             return html
 
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:
