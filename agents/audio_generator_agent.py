@@ -172,28 +172,11 @@ class AudioGeneratorAgent:
 
     def text_to_speech(self, text: str, language: str = 'es', institutional_tone: bool = False) -> Optional[bytes]:
         """Convierte texto a audio con máxima fidelidad rioplatense (es-AR).
-        Prioridad por defecto:
-        1. Google TTS (gTTS) forzando el dominio nacional argentino (tld='com.ar') y endpoint directo es-AR.
-        2. Edge TTS (es-AR-TomasNeural) como respaldo rioplatense.
-        3. API Externa TTS (si está configurada).
+        Prioridad:
+        1. Edge TTS con voz rioplatense (es-AR-TomasNeural) como motor principal de alta calidad.
+        2. Google TTS (gTTS) con tld='com.ar' como respaldo.
         """
-        # 1. Prioridad Principal: Google TTS (gTTS) con acento y endpoint es-AR (Argentina)
-        if HAS_GTTS:
-            # Primero intentar con tld='com.ar' que dirige a Google Argentina
-            for tld_option in ['com.ar', 'com']:
-                try:
-                    tts = gTTS(text=text, lang='es', tld=tld_option, slow=False)
-                    fp = io.BytesIO()
-                    tts.write_to_fp(fp)
-                    fp.seek(0)
-                    data = fp.getvalue()
-                    if len(data) > 1000:
-                        logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option} - Argentina)")
-                        return data
-                except Exception as e:
-                    logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
-
-        # 2. Respaldo: Edge TTS con voz rioplatense (es-AR-TomasNeural)
+        # 1. Prioridad Principal: Edge TTS con voz rioplatense (es-AR-TomasNeural)
         if HAS_EDGE_TTS:
             try:
                 async def _synthesize():
@@ -217,10 +200,25 @@ class AudioGeneratorAgent:
                     audio_bytes = asyncio.run(_synthesize())
 
                 if audio_bytes and len(audio_bytes) > 1000:
-                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Respaldo): {len(audio_bytes)} bytes")
+                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Principal Rioplatense): {len(audio_bytes)} bytes")
                     return audio_bytes
             except Exception as e:
-                logger.warning(f"Error en Edge TTS de respaldo: {e}")
+                logger.warning(f"Error en Edge TTS principal: {e}")
+
+        # 2. Respaldo: Google TTS (gTTS) con tld='com.ar'
+        if HAS_GTTS:
+            for tld_option in ['com.ar', 'com']:
+                try:
+                    tts = gTTS(text=text, lang='es', tld=tld_option, slow=False)
+                    fp = io.BytesIO()
+                    tts.write_to_fp(fp)
+                    fp.seek(0)
+                    data = fp.getvalue()
+                    if len(data) > 1000:
+                        logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option} - Argentina)")
+                        return data
+                except Exception as e:
+                    logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
 
         # 3. API Externa personalizada (si está configurada en .env)
         if self.tts_api_key and self.tts_voice_id and HAS_REQUESTS:

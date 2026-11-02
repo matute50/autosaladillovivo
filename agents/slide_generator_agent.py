@@ -113,9 +113,14 @@ class SlideGeneratorAgent:
             h, w = img_bgr.shape[:2]
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-            # 1. Detección de rostros humanos (frontal)
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+            # 1. Detección de rostros humanos (frontal) — Fallback si falla CascadeClassifier
+            faces = []
+            try:
+                if hasattr(cv2, 'CascadeClassifier') and hasattr(cv2, 'data') and hasattr(cv2.data, 'haarcascades'):
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+            except Exception as e:
+                logger.warning(f"  [SlideGeneratorAgent] Error de OpenCV (detección omitida): {e}")
 
             if len(faces) == 1:
                 x, y, fw, fh = faces[0]
