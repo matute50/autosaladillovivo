@@ -371,8 +371,11 @@ def parse_article_data(url, source_name, category_default):
     else:
         content_text = description
 
-    # 4. IMAGEN DESTACADA
-    image_url = parser.meta.get('og:image') or parser.meta.get('twitter:image')
+    # 4. IMÁGENES Y GALERÍA COMPLETA
+    from agents.scraper_agent import ScraperAgent
+    temp_scraper = ScraperAgent()
+    gallery_images = temp_scraper.extract_gallery_images(html, url, parser.meta.get('og:image'))
+    image_url = gallery_images[0] if gallery_images else (parser.meta.get('og:image') or parser.meta.get('twitter:image'))
     if not image_url and parser.images:
         for img in parser.images:
             if not any(x in img.lower() for x in ['logo', 'icon', 'banner', 'avatar', 'pixel']):
@@ -408,6 +411,7 @@ def parse_article_data(url, source_name, category_default):
         'contenido': content_text,
         'image_url': image_url or "https://saladillovivo.vercel.app/default-og-image.png",
         'imageUrl': image_url or "https://saladillovivo.vercel.app/default-og-image.png",
+        'images_urls': gallery_images,
         'source_url': url,
         'autor': source_name,
         'categoria': category_default,

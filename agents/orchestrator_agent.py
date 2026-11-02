@@ -266,7 +266,21 @@ class OrchestratorAgent:
                 title = art.get('titulo_ia') or art.get('title')
                 text = art.get('contenido_ia') or art.get('text')
                 audio_url = art.get('audio_url') or ''
-                image_urls = [art.get('image_url')] if art.get('image_url') else []
+                raw_gallery = art.get('images_urls')
+                if isinstance(raw_gallery, list) and len(raw_gallery) > 0:
+                    image_urls = [u for u in raw_gallery if u and isinstance(u, str) and u.startswith('http')]
+                elif isinstance(raw_gallery, str) and raw_gallery.startswith('['):
+                    try:
+                        import json
+                        parsed_imgs = json.loads(raw_gallery)
+                        image_urls = [u for u in parsed_imgs if u and isinstance(u, str) and u.startswith('http')]
+                    except Exception:
+                        image_urls = []
+                else:
+                    image_urls = []
+
+                if not image_urls and art.get('image_url'):
+                    image_urls = [art.get('image_url')]
 
                 slide_url = self.slide_agent.process_article_slide(
                     article_id=art_id,

@@ -149,6 +149,8 @@ class StorageAgent:
         unique_slug = self.generate_unique_slug(raw_title)
         now_iso = datetime.now().isoformat()
 
+        gallery_urls = article_data.get('images_urls') or ([image_url] if image_url else [])
+
         payload = {
             'title': raw_title,
             'text': raw_text,
@@ -157,6 +159,7 @@ class StorageAgent:
             'image_url': image_url,
             'og_image_url': image_url,
             'thumbnail_url': image_url,
+            'images_urls': gallery_urls,
             'featureStatus': 'secondary',
             'status': 'draft',
             'is_published': False,

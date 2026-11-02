@@ -399,9 +399,14 @@ class SlideGeneratorAgent:
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
         La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
         durante la duración del audio del slide, con un zoom in 50% más profundo.
+        En slides con múltiples fotos (galería), se adecua el tiempo de visualización de cada foto
+        de acuerdo al tiempo total del slide determinado por la duración del audio generado.
         """
         if not audio_duration:
             audio_duration = self.estimate_audio_duration(text)
+
+        total_photos = len(images) if images else 1
+        photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
 
         template_str = """<!DOCTYPE html>
 <html lang="es">
@@ -412,6 +417,7 @@ class SlideGeneratorAgent:
     <style>
         :root {
             --slide-audio-duration: {{ (audio_duration | round(1)) if audio_duration else 36 }}s;
+            --slide-photo-duration: {{ (photo_duration | round(1)) if photo_duration else 15 }}s;
         }
 
         * {
@@ -477,13 +483,31 @@ class SlideGeneratorAgent:
             height: 100%;
             object-fit: cover;
             will-change: transform;
-            animation: kenBurnsZoom var(--slide-audio-duration, 36s) ease-in-out infinite;
+            animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
         /*
-           Animación Ken Burns adaptada a la duración exacta del audio:
+           Animación Ken Burns para múltiples fotos (galería):
+           Cada foto en pantalla realiza un acercamiento +50% más profundo (scale 1.27)
+           directo a su centro de atención durante el tiempo proporcional
+           asignado de acuerdo a la duración del audio.
+        */
+        @keyframes kenBurnsPhoto {
+            0% {
+                transform: scale(1.0);
+            }
+            50% {
+                transform: scale(1.27);
+            }
+            100% {
+                transform: scale(1.0);
+            }
+        }
+
+        /*
+           Animación Ken Burns para foto única:
            Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
-           durante el tiempo de reproducción del audio.
+           durante el tiempo total de reproducción del audio.
            - Zoom In 50% más profundo: scale(1.0) -> scale(1.27) (aumento de delta de +18% a +27%)
            - Ciclo 1: 0% a 25% (Zoom In) -> 25% a 50% (Zoom Out)
            - Ciclo 2: 50% a 75% (Zoom In) -> 75% a 100% (Zoom Out)
@@ -534,16 +558,21 @@ class SlideGeneratorAgent:
                 var dur = Math.round(durSec * 10) / 10;
                 document.documentElement.style.setProperty('--slide-audio-duration', dur + 's');
 
-                // Si hay más de una foto, adaptar la velocidad de rotación proporcionalmente al audio
+                // En slides con múltiples fotos, adecuar el tiempo de cada foto proporcionalmente al tiempo total del audio
                 if (slides && slides.length > 1) {
+                    var photoDur = Math.round((dur / slides.length) * 10) / 10;
+                    document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
+
                     if (slideInterval) clearInterval(slideInterval);
-                    var durationPerSlideMs = Math.max(4000, Math.round((dur / slides.length) * 1000));
+                    var durationPerSlideMs = Math.round(photoDur * 1000);
                     var currentIndex = 0;
                     slideInterval = setInterval(function() {
                         slides[currentIndex].classList.remove('active');
                         currentIndex = (currentIndex + 1) % slides.length;
                         slides[currentIndex].classList.add('active');
                     }, durationPerSlideMs);
+                } else {
+                    document.documentElement.style.setProperty('--slide-photo-duration', dur + 's');
                 }
             }
 
@@ -571,14 +600,15 @@ class SlideGeneratorAgent:
                 }
             });
 
-            // Fallback para rotación si no hay audio o tarda en responder
+            // Inicialización de rotación proporcional si hay múltiples fotos
             if (slides && slides.length > 1 && !slideInterval) {
+                var initialPhotoDur = Math.round(({{ (photo_duration | round(1)) if photo_duration else 15 }}) * 1000);
                 var currentIndex = 0;
                 slideInterval = setInterval(function() {
                     slides[currentIndex].classList.remove('active');
                     currentIndex = (currentIndex + 1) % slides.length;
                     slides[currentIndex].classList.add('active');
-                }, 5500);
+                }, Math.max(2500, initialPhotoDur));
             }
         })();
     </script>
@@ -592,7 +622,8 @@ class SlideGeneratorAgent:
                 text=text,
                 audio_url=audio_url or "",
                 images=images or [],
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                photo_duration=photo_duration
             )
         else:
             # Fallback simple sin jinja2
@@ -601,8 +632,10 @@ class SlideGeneratorAgent:
             fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
             fy = first_img.get("focal_y", 45) if isinstance(first_img, dict) else 45
             dur_str = str(round(audio_duration, 1) if audio_duration else 36)
+            photo_dur_str = str(round(photo_duration, 1) if photo_duration else 15)
             html = template_str.replace("{{ title }}", title).replace("{{ text }}", text).replace("{{ audio_url }}", audio_url or "")
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
+            html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
             return html
 

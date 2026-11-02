@@ -255,12 +255,14 @@ def deduplicate_batch(articles):
                 kept_source = kept.get('source_name', '')
                 print(f"  [Deduplicación] Noticia repetida detectada: '{cand_title[:55]}...' ({cand_source}) coincide con '{kept_title[:55]}...' ({kept_source}). Se descarta repetición.")
 
-                # Si el nuevo candidato tiene más texto y mejor imagen, enriquecer el elemento conservado
+                # Si el nuevo candidato tiene más texto y mejor imagen/galería, enriquecer el elemento conservado
                 if len(cand.get('text', '')) > len(kept.get('text', '')) + 200:
                     kept['text'] = cand['text']
                     kept['original_text'] = cand['text']
                 if 'default-og-image' in kept.get('image_url', '') and 'default-og-image' not in cand.get('image_url', ''):
                     kept['image_url'] = cand['image_url']
+                if len(cand.get('images_urls', [])) > len(kept.get('images_urls', [])):
+                    kept['images_urls'] = cand['images_urls']
                 break
 
         if not is_dup:
@@ -434,6 +436,93 @@ class ScraperAgent:
             pass
         return parser.links
 
+    def extract_gallery_images(self, html, base_url, og_image=None):
+        """
+        Extrae todas las imágenes de la noticia cuando la publicación posee galería de fotos o múltiples imágenes.
+        Aísla el cuerpo del artículo descartando barras laterales, banners, widgets y publicidad.
+        Prioriza la versión de mayor resolución y deduplica las URLs.
+        """
+        if not html:
+            return [og_image] if og_image else []
+
+        images = []
+        seen_keys = set()
+
+        def add_candidate(img_candidate):
+            if not img_candidate or not isinstance(img_candidate, str):
+                return
+            clean_url = img_candidate.replace('&#038;', '&').replace('&amp;', '&').strip()
+            if clean_url.startswith('data:') or clean_url.startswith('blob:'):
+                return
+            full_url = urljoin(base_url, clean_url)
+            lower = full_url.lower()
+
+            # Descartar logos, iconos, avatares, banners, pixels, widgets sociales y publicidad
+            if any(k in lower for k in [
+                'logo', 'icon', 'avatar', 'gravatar', 'banner', 'pixel', 'advert',
+                'publicidad', 'sponsor', 'theme', 'emoji', 'button', 'mobile.png',
+                'empty.png', 'transparente', '.svg', 'facebook', 'twitter', 'instagram',
+                'whatsapp', 'share', 'jeg-empty', 'pinterest', 'linkedin'
+            ]):
+                return
+
+            # Validar que la ruta del recurso termine en formato de imagen admitido
+            parsed_path = urlparse(full_url).path.lower()
+            if not any(parsed_path.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                return
+
+            # Clave de deduplicación basada en la URL base sin sufijo de dimensiones ni query
+            base_filename = lower.split('?')[0]
+            clean_key = re.sub(r'-\d+x\d+(\.[a-zA-Z]{3,4})$', r'\1', base_filename)
+            if clean_key not in seen_keys:
+                seen_keys.add(clean_key)
+                images.append(full_url)
+
+        # 1. Agregar imagen destacada og:image si existe
+        if og_image:
+            add_candidate(og_image)
+
+        # 2. Aislar el contenedor del artículo para no capturar miniaturas del sidebar/footer
+        art_match = re.search(r'<article[^>]*>(.*?)</article>', html, re.DOTALL | re.I)
+        scoped_html = art_match.group(1) if art_match else html
+        # Remover filas de noticias relacionadas o comentarios dentro del contenedor
+        scoped_html = re.sub(r'<div[^>]*class=[\x22\x27][^\x22\x27]*(?:td-related-row|jnews_related_post|related-posts|comments|post-comments)[^\x22\x27]*[\x22\x27].*$', '', scoped_html, flags=re.DOTALL | re.I)
+
+        # 3. Extraer enlaces directos a imágenes (típicos de galerías lightbox)
+        for a_match in re.finditer(r'<a\s+[^>]*href=[\x22\x27](https?://[^\x22\x27]+\.(?:jpg|jpeg|png|webp)(?:\?[^\x22\x27]*)?)[\x22\x27]', scoped_html, re.I):
+            add_candidate(a_match.group(1))
+
+        # 4. Extraer imágenes dentro de etiquetas <img>
+        for img_match in re.finditer(r'<img\s+([^>]+)>', scoped_html, re.I):
+            attrs = img_match.group(1)
+
+            # Si posee srcset, extraer la de mayor ancho (w)
+            srcset_match = re.search(r'srcset=[\x22\x27]([^\x22\x27]+)[\x22\x27]', attrs, re.I)
+            if srcset_match:
+                parts = [p.strip().split() for p in srcset_match.group(1).split(',') if p.strip()]
+                candidates = []
+                for p in parts:
+                    if len(p) >= 2 and p[1].endswith('w'):
+                        try:
+                            candidates.append((int(p[1][:-1]), p[0]))
+                        except ValueError:
+                            pass
+                    elif len(p) >= 1:
+                        candidates.append((0, p[0]))
+                if candidates:
+                    candidates.sort(reverse=True, key=lambda x: x[0])
+                    add_candidate(candidates[0][1])
+                    continue
+
+            # Atributos de alta resolución y lazy loading
+            for attr in ['data-orig-file', 'data-large-file', 'data-full-url', 'data-img-url', 'data-src', 'data-lazy-src', 'src']:
+                attr_match = re.search(rf'{attr}=[\x22\x27]([^\x22\x27]+)[\x22\x27]', attrs, re.I)
+                if attr_match and not attr_match.group(1).startswith('data:'):
+                    add_candidate(attr_match.group(1))
+                    break
+
+        return images
+
     def parse_article(self, url, source_name, category='Local'):
         """Extrae el contenido completo y metadatos de un artículo con validación editorial."""
         # 1. Filtro estricto: Omitir la columna "Reflexiones" de InfoSaladillo
@@ -488,7 +577,10 @@ class ScraperAgent:
             return None
 
         description = parser.meta_description or (parser.paragraphs[0] if parser.paragraphs else title)
-        image_url = parser.meta_og_image or (parser.images[0] if parser.images else 'https://saladillovivo.vercel.app/default-og-image.png')
+
+        # Extracción completa de fotos de la noticia y galerías
+        gallery_images = self.extract_gallery_images(html, url, parser.meta_og_image)
+        image_url = gallery_images[0] if gallery_images else (parser.meta_og_image or 'https://saladillovivo.vercel.app/default-og-image.png')
 
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
 
@@ -500,6 +592,7 @@ class ScraperAgent:
             'description': description[:300],
             'original_description': description[:300],
             'image_url': image_url,
+            'images_urls': gallery_images,
             'source_url': url,
             'source_name': source_name,
             'categoria': category,
