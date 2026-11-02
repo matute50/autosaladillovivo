@@ -27,11 +27,11 @@ except ImportError:
 
 
 def load_env_variables():
-    """Carga variables desde el entorno y desde .env.local / .env."""
-    env = {}
+    """Carga variables dando máxima prioridad al .env.local y .env del proyecto sobre el entorno."""
+    env = dict(os.environ)
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    for filename in ['.env.local', '.env']:
+    for filename in ['.env', '.env.local']:
         filepath = os.path.join(base_dir, filename)
         if os.path.exists(filepath):
             try:
@@ -40,14 +40,10 @@ def load_env_variables():
                         line = line.strip()
                         if line and not line.startswith('#') and '=' in line:
                             k, v = line.split('=', 1)
-                            k, v = k.strip(), v.strip().strip("'\"")
-                            if k not in env:
-                                env[k] = v
+                            env[k.strip()] = v.strip().strip("'\"")
             except Exception:
                 pass
 
-    for k, v in os.environ.items():
-        env[k] = v
     return env
 
 
@@ -60,8 +56,8 @@ class AiRewriterAgent:
         self.providers = {
             'gemini': {
                 'name': 'Google Gemini',
-                'url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-                'fallback_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+                'url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+                'fallback_url': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
                 'key': self.env.get('GEMINI_API_KEY') or self.env.get('GOOGLE_API_KEY') or self.env.get('NEXT_PUBLIC_GEMINI_API_KEY'),
                 'priority': 1
             },
@@ -109,7 +105,7 @@ CONTENIDO ORIGINAL:
 FILTRO EDITORIAL REGIONAL ESTRICTO:
 "Saladillo Vivo" publica ÚNICAMENTE noticias locales (Saladillo, Del Carril, Cazón, Polvaredas, Álvarez de Toledo) y regionales (partidos vecinos: Roque Pérez, 25 de Mayo, General Alvear, Las Flores, Lobos, Tapalqué, interior bonaerense).
 Si el despacho corresponde a una noticia de orden NACIONAL o INTERNACIONAL sin anclaje local (ejemplos: política exterior o conflictos de otros países, inflación o economía nacional macro sin impacto local, fútbol de Primera División/AFA como Boca/River sin jugador local, lanzamientos comerciales de autos, farándula/espectáculos nacionales), DEBES RECHAZARLA respondiendo exactamente:
-{"es_local_regional": false, "motivo_rechazo": "Noticia nacional/internacional sin anclaje local"}
+{{\"es_local_regional\": false, \"motivo_rechazo\": \"Noticia nacional/internacional sin anclaje local\"}}
 
 Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumple las siguientes:
 
@@ -173,7 +169,8 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             'contents': [{'parts': [{'text': prompt}]}],
             'generationConfig': {
                 'temperature': 0.65,
-                'maxOutputTokens': 1500,
+                'maxOutputTokens': 2048,
+                'thinkingConfig': {'thinkingBudget': 0},
                 'responseMimeType': 'application/json'
             }
         }
@@ -371,6 +368,19 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                 elif prov_key == 'openai':
                     ai_result = self._call_openai(prompt, prov)
 
+                if ai_result:
+                    # Mapeo flexible de nombres de claves devueltos por el LLM
+                    if 'titulo_optimizado' not in ai_result:
+                        for alt in ['titulo', 'title', 'TITULAR RADIAL', 'titular_radial', 'titular', 'titulo_radial']:
+                            if alt in ai_result and ai_result[alt]:
+                                ai_result['titulo_optimizado'] = str(ai_result[alt]).strip()
+                                break
+                    if 'contenido_optimizado' not in ai_result:
+                        for alt in ['contenido', 'content', 'CUERPO', 'cuerpo', 'cuerpo_noticia', 'texto', 'despacho']:
+                            if alt in ai_result and ai_result[alt]:
+                                ai_result['contenido_optimizado'] = str(ai_result[alt]).strip()
+                                break
+
                 if ai_result and ai_result.get('titulo_optimizado'):
                     used_provider = prov['name']
                     print(f"    -> IA exitosa con {used_provider}")
@@ -396,6 +406,12 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             ai_result = self.local_heuristic_fallback(title, content)
             used_provider = 'Fallback Heurístico Local'
 
+        # Limitar meta_description estrictamente a <= 155 caracteres para SEO
+        raw_meta = ai_result.get('meta_description') or title[:150]
+        meta_desc = raw_meta.strip()
+        if len(meta_desc) > 155:
+            meta_desc = meta_desc[:152].rsplit(' ', 1)[0] + '...'
+
         feature_status = self.calculate_priority_score(
             ai_result.get('titulo_optimizado', title),
             ai_result.get('contenido_optimizado', content),
@@ -405,7 +421,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         return {
             'titulo_ia': ai_result.get('titulo_optimizado', title),
             'contenido_ia': ai_result.get('contenido_optimizado', content),
-            'meta_description': ai_result.get('meta_description', title[:150]),
+            'meta_description': meta_desc,
             'meta_keywords': ai_result.get('palabras_clave', ['Saladillo']),
             'featureStatus': feature_status,
             'ai_provider': used_provider,
