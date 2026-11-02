@@ -62,24 +62,24 @@ class AiRewriterAgent:
                 'priority': 1
             },
             'groq': {
-                'name': 'Groq (Llama 3.3 70B)',
+                'name': 'Groq (GPT-OSS 20B)',
                 'url': 'https://api.groq.com/openai/v1/chat/completions',
                 'key': self.env.get('GROQ_API_KEY'),
-                'model': self.env.get('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+                'model': self.env.get('GROQ_MODEL', 'openai/gpt-oss-20b'),
                 'priority': 2
             },
             'glm': {
                 'name': 'GLM (Zhipu AI)',
                 'url': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
                 'key': self.env.get('GLM_API_KEY') or self.env.get('ZHIPU_API_KEY'),
-                'model': self.env.get('GLM_MODEL', 'glm-4-flash'),
+                'model': self.env.get('GLM_MODEL', 'glm-4.5-flash'),
                 'priority': 3
             },
             'openrouter': {
                 'name': 'OpenRouter Free Tier',
                 'url': 'https://openrouter.ai/api/v1/chat/completions',
                 'key': self.env.get('OPENROUTER_API_KEY'),
-                'model': self.env.get('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free'),
+                'model': self.env.get('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
                 'priority': 4
             },
             'openai': {
@@ -191,7 +191,9 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         return None
 
     def _call_groq(self, prompt, provider):
-        """Llamada a la API de Groq (Llama 3.3 70B)."""
+        """Llamada a la API de Groq (GPT-OSS 20B / Llama)."""
+        if not HAS_REQUESTS:
+            return None
         headers = {
             'Authorization': f'Bearer {provider["key"]}',
             'Content-Type': 'application/json'
@@ -203,9 +205,19 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             'max_tokens': 1500,
             'response_format': {'type': 'json_object'}
         }
+        # Agregar system prompt implícito o fallback si el modelo rechaza json_object estricto
         resp = requests.post(provider['url'], headers=headers, json=data, timeout=30)
         if resp.status_code == 200:
-            content = resp.json()['choices'][0]['message']['content']
+            try:
+                content = resp.json()['choices'][0]['message']['content']
+                return self._extract_json(content)
+            except Exception:
+                pass
+        # Segundo intento sin response_format estricto por si el modelo es nativo libre
+        data.pop('response_format', None)
+        resp2 = requests.post(provider['url'], headers=headers, json=data, timeout=30)
+        if resp2.status_code == 200:
+            content = resp2.json()['choices'][0]['message']['content']
             return self._extract_json(content)
         return None
 

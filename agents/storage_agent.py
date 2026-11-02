@@ -18,7 +18,7 @@ import json
 import time
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import requests
@@ -280,6 +280,34 @@ class StorageAgent:
     def update_with_ai_audio_and_slide(self, article_id, ai_data=None, audio_url=None, slide_url=None):
         """Actualiza artículo con IA, audio y slide (compatibilidad total con SlideGeneratorAgent)."""
         return self.update_with_ai(article_id, ai_data=ai_data, audio_url=audio_url, slide_url=slide_url)
+
+    def find_recent_processed_articles(self, days=3, limit=150):
+        """Busca artículos recientes en Supabase para deduplicación editorial más robusta."""
+        try:
+            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            resp = requests.get(
+                self.base_rest_url,
+                params={
+                    'select': 'id,title,text,slug,status,is_published,created_at,updatedAt',
+                    'created_at': f'gte.{cutoff}',
+                    'order': 'created_at.desc',
+                    'limit': limit,
+                },
+                headers=self.get_headers(False),
+                timeout=25
+            )
+            if resp.status_code != 200:
+                print(f"  [StorageAgent] Error buscando artículos recientes: HTTP {resp.status_code} - {resp.text[:300]}")
+                return []
+            rows = []
+            for row in resp.json() or []:
+                article = dict(row)
+                article['db_id'] = article.get('id')
+                rows.append(article)
+            return rows
+        except Exception as e:
+            print(f"  [StorageAgent] Error buscando artículos recientes: {e}")
+            return []
 
     def find_pending_ai_articles(self, limit=20):
         """Busca artículos en la base de datos que estén en estado 'draft' y no procesados por IA."""

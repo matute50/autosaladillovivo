@@ -22,11 +22,19 @@ import os
 import sys
 import json
 import time
+import hashlib
 import logging
 import threading
 from datetime import datetime, timedelta
 
 from .scraper_agent import ScraperAgent, are_articles_duplicate
+from .article_ledger import (
+    classify_candidates,
+    known_source_identities,
+    load_article_state,
+    retryable_source_identities,
+    save_article_state,
+)
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
 from .audio_generator_agent import AudioGeneratorAgent
@@ -123,18 +131,27 @@ class OrchestratorAgent:
             logger.error("❌ Falló la verificación de conexión con Supabase. Abortando ciclo.")
             return False
 
-        # Cargar historial local para no re-scrapear
-        history_path = os.path.join(DATA_DIR, 'scraped_articles.json')
+        # Estado editorial persistente: distingue publicado/procesado, duplicado y pendiente.
+        article_state = load_article_state(DATA_DIR, now_iso=start_time.isoformat())
+        known_identities = set(known_source_identities(article_state.values()))
+        retryable_identities = set(retryable_source_identities(article_state.values()))
+
+        # Hashes de URLs ya tratadas. Las entradas pendientes/retryables se reintentan.
         existing_hashes = set()
-        if os.path.exists(history_path):
-            try:
-                with open(history_path, 'r', encoding='utf-8') as f:
-                    history = json.load(f)
-                    for item in history:
-                        if 'hash' in item:
-                            existing_hashes.add(item['hash'])
-            except Exception:
-                pass
+        for record in article_state.values():
+            source_url = record.get('source_url') or ''
+            source_key = record.get('source_identity') or source_url
+            if source_key and source_key.rstrip('/') in retryable_identities:
+                continue
+            for candidate_url in (source_url, source_url.rstrip('/'), source_key):
+                if candidate_url:
+                    existing_hashes.add(hashlib.md5(candidate_url.encode('utf-8')).hexdigest())
+
+        try:
+            recent_published = self.storage_agent.find_recent_processed_articles(days=3, limit=150)
+        except Exception as exc:
+            logger.warning(f"  [Deduplicación] No pude leer recientes de Supabase: {exc}")
+            recent_published = []
 
         # ----------------------------------------------------------------------
         # PASO 1: SCRAPING
@@ -145,67 +162,59 @@ class OrchestratorAgent:
             existing_hashes=existing_hashes
         )
 
+        duplicate_articles = []
+        processed_for_state = []
+
         if not scraped_articles:
             logger.info("ℹ️ No se detectaron noticias nuevas en las portadas.")
             # Verificar si hay borradores previos pendientes de procesar
             pending_db = self.storage_agent.find_pending_ai_articles(limit=5)
             if not pending_db:
                 logger.info("✅ No hay tareas pendientes en la base de datos.")
+                save_article_state(DATA_DIR, article_state, duplicate_articles=duplicate_articles)
                 return True
             logger.info(f"🔁 Se encontraron {len(pending_db)} artículos en borrador para continuar el flujo.")
             articles_to_process = pending_db
         else:
             logger.info(f"✅ [PASO 1/6] Scraping finalizado: {len(scraped_articles)} artículos nuevos extraídos.")
-            # Guardar backup local
-            all_scraped = scraped_articles
-            if os.path.exists(history_path):
-                try:
-                    with open(history_path, 'r', encoding='utf-8') as f:
-                        all_scraped = scraped_articles + json.load(f)
-                except Exception:
-                    pass
-            with open(history_path, 'w', encoding='utf-8') as f:
-                json.dump(all_scraped, f, ensure_ascii=False, indent=2)
 
             # ------------------------------------------------------------------
-            # PASO 2: GUARDAR EN BASE DE DATOS (BORRADOR)
+            # PASO 2: GUARDAR EN BASE DE DATOS (BORRADOR) O ACTUALIZAR NOTA EXISTENTE
             # ------------------------------------------------------------------
-            logger.info("💾 [PASO 2/6] StorageAgent: Verificando contra historial y guardando borradores...")
-            
-            # Cargar historial de artículos recientes para evitar republicar hechos ya tratados
-            recent_history = []
-            for h_file in ['modified_articles.json', 'scraped_articles.json']:
-                h_path = os.path.join(DATA_DIR, h_file)
-                if os.path.exists(h_path):
-                    try:
-                        with open(h_path, 'r', encoding='utf-8') as f:
-                            recent_history.extend(json.load(f)[:60])
-                    except Exception:
-                        pass
+            logger.info("💾 [PASO 2/6] StorageAgent: Clasificando nuevas, actualizaciones y duplicados...")
 
             articles_to_process = []
-            for art in scraped_articles:
-                # Comprobar si ya existe en historial reciente
-                is_duplicate_published = False
-                for prev in recent_history:
-                    # Comparar solo si no es exactamente el mismo hash (el hash ya fue filtrado)
-                    if prev.get('title') and are_articles_duplicate(art, prev):
-                        is_duplicate_published = True
-                        logger.info(f"  [Deduplicación] Descartando '{art['title'][:50]}...': ya fue tratada en Saladillo Vivo.")
-                        break
+            accepted, duplicate_articles, _ = classify_candidates(
+                scraped_articles,
+                processed_by_url=article_state,
+                recent_published=recent_published,
+            )
 
-                if is_duplicate_published:
+            for art in accepted:
+                if art.get('id'):
+                    logger.info(f"  [Deduplicación] Actualizando noticia existente ID {art['id']}: '{art.get('title', '')[:50]}...'")
+                    articles_to_process.append(art)
+                    processed_for_state.append(art)
                     continue
 
                 draft_record = self.storage_agent.save_draft(art)
                 if draft_record and draft_record.get('id'):
                     art['id'] = draft_record['id']
+                    art['db_id'] = draft_record['id']
+                    art['db_status'] = 'draft'
                     articles_to_process.append(art)
+                    processed_for_state.append(art)
                 time.sleep(0.5)
 
-            logger.info(f"✅ [PASO 2/6] Guardados en Supabase: {len(articles_to_process)} borradores con ID asignado.")
+            if duplicate_articles:
+                logger.info(f"🔁 [PASO 2/6] Descartados como duplicados/ya tratados: {len(duplicate_articles)}.")
+
+            logger.info(f"✅ [PASO 2/6] Artículos listos para procesar: {len(articles_to_process)}.")
 
         if not articles_to_process:
+            if duplicate_articles:
+                logger.info("ℹ️ No se publicaron notas nuevas: todas las candidatas ya fueron tratadas o son actualizaciones menores.")
+            save_article_state(DATA_DIR, article_state, processed_articles=processed_for_state, duplicate_articles=duplicate_articles)
             logger.warning("⚠️ No se pudieron registrar artículos en la base de datos.")
             return False
 
@@ -343,6 +352,7 @@ class OrchestratorAgent:
         self.last_execution = datetime.now()
 
         logger.info(f"🎉 Ciclo completado con éxito en {duration.total_seconds():.1f} segundos.")
+        save_article_state(DATA_DIR, article_state, processed_articles=modified_list, duplicate_articles=duplicate_articles, status='published')
         return True
 
     def start_scheduler(self):
