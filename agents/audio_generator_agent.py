@@ -7,7 +7,7 @@ narrado con locución natural, lo optimiza y normaliza sonoramente (LUFS/dBFS),
 y lo aloja en el bucket público 'audios' de Supabase Storage.
 
 Características:
-- Locución en Español (acento rioplatense/argentino con gTTS tld='com.ar' y fallback a 'es').
+- Locución en Español con acento rioplatense auténtico (Gemini TTS + reescritura fonética SOUL.md).
 - Normalización automática de volumen con Pydub y AudioSegment.
 - Compresión a MP3 128 kbps optimizada para streaming web y móvil.
 - Subida directa al bucket 'audios' en Supabase Storage con headers públicos.
@@ -23,6 +23,8 @@ import random
 import hashlib
 import logging
 import asyncio
+import base64
+import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Union
@@ -50,6 +52,13 @@ try:
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
+
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GEMINI_TTS = True
+except ImportError:
+    HAS_GEMINI_TTS = False
 
 from .storage_agent import StorageAgent, load_env_credentials
 from .ai_rewriter_agent import load_env_variables
@@ -93,12 +102,57 @@ INSTITUTIONAL_CLOSING_PHRASES = [
     "Saladillo Vivo. Un paso más allá que leer las noticias."
 ]
 
+# Tag de estilo para Gemini TTS (SOUL.md)
+GEMINI_TTS_STYLE_TAG = "[relaxed, colloquial tone, argentinian rioplatense accent]"
+
+
+def apply_rioplatense_phonetics(text: str) -> str:
+    """
+    Aplica las reglas fonéticas rioplatenses obligatorias (SOUL.md) para Gemini TTS.
+    Gemini TTS lee el texto literalmente, por lo que debemos reescribir:
+    1. S ante consonante → h (aspiración)
+    2. S final → h (aspiración)
+    3. S intervocálica se mantiene (excepción)
+    4. Y / LL → sh (yeísmo rehilado)
+    """
+    if not text:
+        return ""
+
+    # Primero, protegemos la S intervocálica marcándola temporalmente
+    # Patrón: vocal + s + vocal (case insensitive)
+    text = re.sub(r'([aeiouáéíóúAEIOUÁÉÍÓÚ])s([aeiouáéíóúAEIOUÁÉÍÓÚ])',
+                  r'\1§S_INTERVOCALICA§\2', text, flags=re.IGNORECASE)
+
+    # 1. S ante consonante → h (aspiración suave)
+    # Consonantes: b c d f g h j k l m n ñ p q r s t v w x y z
+    text = re.sub(r's(?=[bcdfghjklmnñpqrstvwxyzBCDFGHJKLMNÑPQRSTVWXYZ])', 'h', text)
+
+    # 2. S final de palabra → h
+    text = re.sub(r's\b', 'h', text)
+
+    # 3. Restaurar S intervocálica protegida
+    text = text.replace('§S_INTERVOCALICA§', 's')
+
+    # 4. Yeísmo rehilado: Y / LL → sh
+    # Y como consonante inicial o entre vocales
+    text = re.sub(r'\by\b', 'sh', text, flags=re.IGNORECASE)  # "y" sola
+    text = re.sub(r'\by(?=[aeiouáéíóúAEIOUÁÉÍÓÚ])', 'sh', text, flags=re.IGNORECASE)  # "ya", "yo", etc.
+    text = re.sub(r'll', 'sh', text, flags=re.IGNORECASE)  # "ll" → "sh"
+
+    return text
+
+
+def build_gemini_tts_prompt(text: str) -> str:
+    """Construye el prompt completo para Gemini TTS con tag de estilo y reescritura fonética."""
+    phonetic_text = apply_rioplatense_phonetics(text)
+    return f"{GEMINI_TTS_STYLE_TAG} {phonetic_text}"
+
 
 class AudioGeneratorAgent:
     """
     Agente de generación y publicación de audios para noticias de Saladillo Vivo.
     """
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/audios", voice: str = "es-AR-TomasNeural"):
+    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/audios", voice: str = "Aoede"):
         self.env = load_env_variables() if 'load_env_variables' in globals() else {}
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url).rstrip('/')
@@ -106,10 +160,18 @@ class AudioGeneratorAgent:
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "audios"
-        self.voice = voice  # es-AR-TomasNeural (Voz masculina español rioplatense argentina)
+        self.voice = voice  # Gemini TTS voice: Aoede, Charon, Fenrir, Kore, Puck, etc.
         self.tts_api_key = self.env.get('TTS_API_KEY') or self.env.get('ELEVENLABS_API_KEY')
-        self.tts_voice_id = self.env.get('TTS_VOICE_ID')  # ID de voz personalizada externa si se configura
+        self.tts_voice_id = self.env.get('TTS_VOICE_ID')
         self.tts_api_url = self.env.get('TTS_API_URL', 'https://api.elevenlabs.io/v1/text-to-speech')
+
+        # Resolver API key de Gemini
+        self.gemini_api_key = (
+            self.env.get('GEMINI_API_KEY') or
+            self.env.get('GOOGLE_API_KEY') or
+            os.environ.get('GEMINI_API_KEY') or
+            os.environ.get('GOOGLE_API_KEY')
+        )
 
         self._ensure_storage_bucket()
 
@@ -155,7 +217,7 @@ class AudioGeneratorAgent:
         # Normalizar espacios y saltos de línea
         clean = re.sub(r'[\r\n]+', '. ', clean)
         clean = re.sub(r'\s+', ' ', clean)
-        # Remover caracteres no legibles
+        # Remover caracteres no legibles (permitir acentos y ñ)
         clean = re.sub(r'[^\w\s\.,;:¡!¿?\-\'\"áéíóúÁÉÍÓÚñÑ]', '', clean)
         return clean.strip()
 
@@ -170,18 +232,130 @@ class AudioGeneratorAgent:
         file_hash = hashlib.md5(hash_input.encode('utf-8')).hexdigest()[:8]
         return f"article_{article_id}_{file_hash}.mp3"
 
+    def text_to_speech_gemini(self, text: str) -> Optional[bytes]:
+        """Genera audio con Gemini TTS aplicando reescritura fonética rioplatense (SOUL.md)."""
+        if not HAS_GEMINI_TTS:
+            logger.warning("Gemini TTS no disponible: falta google-genai")
+            return None
+
+        if not self.gemini_api_key:
+            logger.warning("Gemini TTS: GEMINI_API_KEY / GOOGLE_API_KEY no configurada")
+            return None
+
+        try:
+            client = genai.Client(api_key=self.gemini_api_key)
+            prompt = build_gemini_tts_prompt(text)
+
+            logger.info(f"Gemini TTS: generando audio con voz '{self.voice}' (reescritura fonética aplicada)")
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice)
+                        )
+                    )
+                )
+            )
+
+            # Extraer audio PCM (puede venir base64 o binario crudo)
+            for part in response.candidates[0].content.parts:
+                if part.inline_data and part.inline_data.data:
+                    raw = part.inline_data.data
+                    # Detectar si es base64 (solo caracteres ASCII válidos) o PCM crudo
+                    if isinstance(raw, str):
+                        pcm_b64 = raw
+                    elif isinstance(raw, bytes):
+                        # Intentar decodificar como base64; si falla, es PCM crudo
+                        try:
+                            pcm_b64 = raw.decode('ascii')
+                            # Validar que sea base64 real
+                            import base64
+                            base64.b64decode(pcm_b64, validate=True)
+                            # Es base64 válido
+                        except Exception:
+                            # No es base64, es PCM crudo directo
+                            logger.info("Gemini TTS: recibido PCM crudo directo, envolviendo...")
+                            wav_bytes = self._pcm_to_wav(raw, sample_rate=24000)
+                            mp3_bytes = self._wav_to_mp3(wav_bytes)
+                            logger.info(f"Gemini TTS: audio generado exitosamente ({len(mp3_bytes)} bytes MP3)")
+                            return mp3_bytes
+                    else:
+                        logger.error(f"Gemini TTS: tipo de datos inesperado: {type(raw)}")
+                        continue
+
+                    # Fix padding si es necesario
+                    missing_padding = len(pcm_b64) % 4
+                    if missing_padding:
+                        pcm_b64 += '=' * (4 - missing_padding)
+                    pcm_bytes = base64.b64decode(pcm_b64)
+
+                    # Convertir PCM 24kHz mono 16-bit a WAV y luego a MP3 con ffmpeg
+                    wav_bytes = self._pcm_to_wav(pcm_bytes, sample_rate=24000)
+                    mp3_bytes = self._wav_to_mp3(wav_bytes)
+
+                    logger.info(f"Gemini TTS: audio generado exitosamente ({len(mp3_bytes)} bytes MP3)")
+                    return mp3_bytes
+
+            logger.error("Gemini TTS: no se recibió datos de audio en la respuesta")
+            return None
+
+        except Exception as e:
+            logger.error(f"Gemini TTS error: {e}")
+            return None
+
+    def _pcm_to_wav(self, pcm_bytes: bytes, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
+        """Envuelve PCM crudo en contenedor WAV."""
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(sample_width)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
+        wav_buffer.seek(0)
+        return wav_buffer.read()
+
+    def _wav_to_mp3(self, wav_bytes: bytes, bitrate: str = "128k") -> bytes:
+        """Convierte WAV a MP3 usando ffmpeg."""
+        try:
+            import subprocess
+            proc = subprocess.run(
+                ['ffmpeg', '-y', '-i', 'pipe:0', '-c:a', 'libmp3lame', '-b:a', bitrate, '-f', 'mp3', 'pipe:1'],
+                input=wav_bytes,
+                capture_output=True,
+                timeout=30
+            )
+            if proc.returncode == 0 and proc.stdout:
+                return proc.stdout
+            else:
+                logger.warning(f"ffmpeg falló: {proc.stderr.decode()[:200]}")
+                return wav_bytes  # fallback a WAV si ffmpeg falla
+        except Exception as e:
+            logger.warning(f"ffmpeg no disponible o error: {e}")
+            return wav_bytes
+
     def text_to_speech(self, text: str, language: str = 'es', institutional_tone: bool = False) -> Optional[bytes]:
-        """Convierte texto a audio con máxima fidelidad rioplatense (es-AR).
-        Prioridad:
-        1. Edge TTS con voz rioplatense (es-AR-TomasNeural) como motor principal de alta calidad.
-        2. Google TTS (gTTS) con tld='com.ar' como respaldo.
         """
-        # 1. Prioridad Principal: Edge TTS con voz rioplatense (es-AR-TomasNeural)
+        Convierte texto a audio con máxima fidelidad rioplatense.
+        Prioridad:
+        1. Gemini TTS con reescritura fonética rioplatense (SOUL.md) — motor principal.
+        2. Edge TTS con voz rioplatense (es-AR-TomasNeural) — respaldo nativo.
+        3. Google TTS (gTTS) con tld='com.ar' — respaldo genérico.
+        """
+        # 1. Prioridad Principal: Gemini TTS con reescritura fonética rioplatense
+        gemini_audio = self.text_to_speech_gemini(text)
+        if gemini_audio:
+            return gemini_audio
+
+        # 2. Respaldo: Edge TTS con voz rioplatense (es-AR-TomasNeural)
         if HAS_EDGE_TTS:
             try:
                 async def _synthesize():
                     rate_param = "-4%" if institutional_tone else "+0%"
-                    comm = edge_tts.Communicate(text, self.voice, rate=rate_param)
+                    comm = edge_tts.Communicate(text, "es-AR-TomasNeural", rate=rate_param)
                     audio_data = bytearray()
                     async for chunk in comm.stream():
                         if chunk.get("type") == "audio":
@@ -200,12 +374,12 @@ class AudioGeneratorAgent:
                     audio_bytes = asyncio.run(_synthesize())
 
                 if audio_bytes and len(audio_bytes) > 1000:
-                    logger.info(f"Audio sintetizado con éxito con Edge TTS ({self.voice} - Principal Rioplatense): {len(audio_bytes)} bytes")
+                    logger.info(f"Audio sintetizado con éxito con Edge TTS (es-AR-TomasNeural - Respaldo): {len(audio_bytes)} bytes")
                     return audio_bytes
             except Exception as e:
-                logger.warning(f"Error en Edge TTS principal: {e}")
+                logger.warning(f"Error en Edge TTS de respaldo: {e}")
 
-        # 2. Respaldo: Google TTS (gTTS) con tld='com.ar'
+        # 3. Respaldo: Google TTS (gTTS) con tld='com.ar'
         if HAS_GTTS:
             for tld_option in ['com.ar', 'com']:
                 try:
@@ -220,7 +394,7 @@ class AudioGeneratorAgent:
                 except Exception as e:
                     logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
 
-        # 3. API Externa personalizada (si está configurada en .env)
+        # 4. API Externa personalizada (si está configurada en .env)
         if self.tts_api_key and self.tts_voice_id and HAS_REQUESTS:
             try:
                 headers = {
@@ -267,123 +441,74 @@ class AudioGeneratorAgent:
             else:
                 final_audio = normalized
 
-            # Exportar a MP3 a 128kbps constante
+            # Exportar a MP3 128 kbps
             buf_out = io.BytesIO()
             final_audio.export(buf_out, format="mp3", bitrate="128k")
+            buf_out.seek(0)
             return buf_out.getvalue()
+
         except Exception as e:
-            logger.warning(f"Optimización con pydub omitida por excepción: {e}")
+            logger.warning(f"Error optimizando audio con Pydub: {e}")
             return audio_bytes
 
-    def upload_to_supabase_storage(self, audio_bytes: bytes, filename: str) -> Optional[str]:
-        """Sube el archivo de audio al bucket 'audios' de Supabase y obtiene su URL pública."""
-        if not HAS_REQUESTS:
+    def upload_audio(self, article_id: Union[int, str], audio_bytes: bytes, title: str) -> Optional[str]:
+        """Sube el audio MP3 al bucket 'audios' de Supabase Storage y retorna la URL pública."""
+        if not HAS_REQUESTS or not self.supabase_key or not audio_bytes:
             return None
 
-        # 1. Guardar copia local de respaldo
-        local_filepath = self.storage_path / filename
-        try:
-            with open(local_filepath, 'wb') as f:
-                f.write(audio_bytes)
-        except Exception as e:
-            logger.warning(f"No se pudo guardar copia local de {filename}: {e}")
-
-        # 2. Subir a Supabase Storage REST API
-        upload_url = f"{self.supabase_url}/storage/v1/object/{self.bucket_name}/{filename}"
+        filename = self.generate_audio_filename(article_id, title)
+        url = f"{self.supabase_url}/storage/v1/object/{self.bucket_name}/{filename}"
         headers = self._get_storage_headers("audio/mpeg")
 
         try:
-            resp = requests.post(upload_url, headers=headers, data=audio_bytes, timeout=30)
+            resp = requests.post(url, headers=headers, data=audio_bytes, timeout=30)
             if resp.status_code in (200, 201):
                 public_url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{filename}"
-                logger.info(f"Audio subido exitosamente a Supabase Storage: {public_url}")
+                logger.info(f"Audio subido a Supabase Storage: {public_url}")
                 return public_url
             else:
-                logger.error(f"Error subiendo audio a Supabase Storage ({resp.status_code}): {resp.text}")
-                return None
+                logger.error(f"Error subiendo audio a Supabase: HTTP {resp.status_code} - {resp.text[:200]}")
         except Exception as e:
-            logger.error(f"Excepción subiendo audio a Supabase Storage: {e}")
-            return None
+            logger.error(f"Excepción subiendo audio: {e}")
+        return None
 
     def process_article_audio(self, article_id: Union[int, str], title: str, text: str, description: str = "") -> Optional[str]:
         """
-        Procesa el ciclo completo para un artículo:
-        1. Limpieza de texto (Título + Bajada + Contenido)
-        2. Text-To-Speech (gTTS)
-        3. Optimización acústica (Pydub / FFmpeg)
-        4. Subida a Supabase Storage
-        5. Retorna la URL pública del audio
+        Proceso completo: limpia texto, genera audio con TTS, optimiza, sube a Storage.
+        Retorna la URL pública del audio o None si falla.
         """
+        # Construir texto completo para locución
         clean_title = self.clean_text_for_speech(title)
-        clean_desc = self.clean_text_for_speech(description)
         clean_text = self.clean_text_for_speech(text)
+        clean_desc = self.clean_text_for_speech(description) if description else ""
 
-        # Estructurar la locución: Título... Copete... Desarrollo de la noticia
-        parts = [clean_title]
-        if clean_desc and clean_desc not in clean_title:
-            parts.append(clean_desc)
+        # Estructura: Título + Descripción + Texto completo + Frase de cierre
+        speech_parts = []
+        if clean_title:
+            speech_parts.append(clean_title)
+        if clean_desc:
+            speech_parts.append(clean_desc)
         if clean_text:
-            parts.append(clean_text)
+            speech_parts.append(clean_text)
 
-        full_speech = ". ".join(parts)
-
-        # Límite seguro para no exceder cuotas de gTTS y garantizar audios ágiles
-        if len(full_speech) > 4500:
-            full_speech = full_speech[:4500].rsplit('.', 1)[0] + ". Para más información, visitá saladillovivo.com.ar."
-
-        if len(full_speech) < 20:
-            logger.warning(f"Artículo {article_id} sin contenido suficiente para audio.")
-            return None
-
-        print(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(full_speech)}")
-
-        # Elegir frase de cierre institucional al azar
         closing_phrase = self.get_random_closing_phrase()
-        print(f"  [AudioGeneratorAgent] Frase institucional de cierre: \"{closing_phrase}\"")
+        speech_parts.append(closing_phrase)
 
-        # 1. Síntesis de voz con pausa de 1 segundo antes del cierre institucional
-        audio_bytes = None
-        if HAS_PYDUB:
-            try:
-                # Síntesis del despacho noticioso
-                news_bytes = self.text_to_speech(full_speech, institutional_tone=False)
-                # Síntesis de la frase institucional
-                closing_bytes = self.text_to_speech(closing_phrase, institutional_tone=True)
+        full_speech = ". ".join(speech_parts)
 
-                if news_bytes and closing_bytes:
-                    seg_news = AudioSegment.from_file(io.BytesIO(news_bytes), format="mp3")
-                    seg_closing = AudioSegment.from_file(io.BytesIO(closing_bytes), format="mp3")
-                    # Silencio de exactamente 1 segundo (1000 ms)
-                    silence_1s = AudioSegment.silent(duration=1000)
+        logger.info(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(full_speech)}")
+        logger.info(f"  [AudioGeneratorAgent] Frase institucional de cierre: \"{closing_phrase}\"")
 
-                    # Ensamblar audio completo: Noticia + 1s silencio + Cierre institucional
-                    combined_audio = seg_news + silence_1s + seg_closing
-                    buf_combined = io.BytesIO()
-                    combined_audio.export(buf_combined, format="mp3", bitrate="128k")
-                    audio_bytes = buf_combined.getvalue()
-                    self.last_audio_duration = round(len(combined_audio) / 1000.0, 1)
-                    logger.info(f"Audio ensamblado con éxito: Noticia ({len(seg_news)/1000:.1f}s) + Silencio (1.0s) + Cierre ({len(seg_closing)/1000:.1f}s) — Total: {self.last_audio_duration}s")
-            except Exception as e:
-                logger.warning(f"Error combinando segmentos de audio con pydub ({e}). Aplicando fallback.")
-
-        # Fallback si Pydub no está disponible o falló
+        # Generar audio con TTS
+        audio_bytes = self.text_to_speech(full_speech)
         if not audio_bytes:
-            # Pausa con puntos suspensivos para generar el silencio
-            full_speech_with_closing = f"{full_speech}. ... ... {closing_phrase}"
-            audio_bytes = self.text_to_speech(full_speech_with_closing)
-
-        if not audio_bytes:
-            logger.error(f"Fallo al generar TTS para artículo {article_id}.")
             return None
 
-        # 2. Optimización acústica (normalización sonora y filtrado)
-        optimized_audio = self.optimize_audio(audio_bytes)
+        # Optimizar audio (normalizar, filtrar, MP3 128kbps)
+        audio_bytes = self.optimize_audio(audio_bytes)
 
-        # 3. Nombre de archivo único
-        filename = self.generate_audio_filename(article_id, title)
-
-        # 4. Subida a Supabase Storage
-        audio_url = self.upload_to_supabase_storage(optimized_audio, filename)
+        # Subir a Supabase Storage
+        audio_url = self.upload_audio(article_id, audio_bytes, title)
         return audio_url
 
     def process_articles_batch(self, articles: List[Dict]) -> Dict[Union[int, str], Optional[str]]:
@@ -409,8 +534,6 @@ class AudioGeneratorAgent:
             )
             results[art_id] = audio_url
             art['audio_url'] = audio_url
-            if hasattr(self, 'last_audio_duration') and self.last_audio_duration:
-                art['audio_duration'] = self.last_audio_duration
             time.sleep(1.5)  # Cortesía entre llamadas de TTS
 
         return results
