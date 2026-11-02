@@ -534,6 +534,12 @@ const VideoSection: React.FC = () => {
                 const el = e.currentTarget;
                 if (el.duration && isFinite(el.duration) && el.duration > 0) {
                   setAudioDurationSec(el.duration);
+                  try {
+                    const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
+                    if (iframe && iframe.contentWindow) {
+                      iframe.contentWindow.postMessage({ type: 'SET_AUDIO_DURATION', duration: el.duration }, '*');
+                    }
+                  } catch (err) {}
                 }
               }}
               onEnded={() => {

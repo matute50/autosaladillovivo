@@ -82,6 +82,16 @@ logger.setLevel(logging.INFO)
 
 
 class SlideGeneratorAgent:
+    def estimate_audio_duration(self, text: str) -> float:
+        """
+        Calcula una estimación precisa de la duración del audio en segundos
+        basada en la tasa de elocución estándar rioplatense (~125 palabras/min)
+        más 1 segundo de silencio y 3 segundos de frase institucional.
+        """
+        words = len(text.strip().split()) if text else 0
+        duration = (words / 2.08) + 1.0 + 3.0
+        return max(20.0, min(round(duration, 1), 120.0))
+
     def detect_attention_center(self, image_bytes: bytes):
         """
         Determina el centro de atención de la imagen utilizando visión por computadora:
@@ -384,10 +394,15 @@ class SlideGeneratorAgent:
         return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
-                          audio_url: str, images: List[str]) -> str:
+                          audio_url: str, images: List[str], audio_duration: Optional[float] = None) -> str:
         """
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
+        La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
+        durante la duración del audio del slide, con un zoom in 50% más profundo.
         """
+        if not audio_duration:
+            audio_duration = self.estimate_audio_duration(text)
+
         template_str = """<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -395,6 +410,10 @@ class SlideGeneratorAgent:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
     <style>
+        :root {
+            --slide-audio-duration: {{ (audio_duration | round(1)) if audio_duration else 36 }}s;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -458,25 +477,29 @@ class SlideGeneratorAgent:
             height: 100%;
             object-fit: cover;
             will-change: transform;
-            animation: kenBurnsZoom 18s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+            animation: kenBurnsZoom var(--slide-audio-duration, 36s) ease-in-out infinite;
         }
 
-        .photo-slide:nth-child(2) .photo-main {
-            animation-duration: 21s;
-            animation-delay: -4s;
-        }
-
-        .photo-slide:nth-child(3) .photo-main {
-            animation-duration: 23s;
-            animation-delay: -8s;
-        }
-
+        /*
+           Animación Ken Burns adaptada a la duración exacta del audio:
+           Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
+           durante el tiempo de reproducción del audio.
+           - Zoom In 50% más profundo: scale(1.0) -> scale(1.27) (aumento de delta de +18% a +27%)
+           - Ciclo 1: 0% a 25% (Zoom In) -> 25% a 50% (Zoom Out)
+           - Ciclo 2: 50% a 75% (Zoom In) -> 75% a 100% (Zoom Out)
+        */
         @keyframes kenBurnsZoom {
             0% {
                 transform: scale(1.0);
             }
+            25% {
+                transform: scale(1.27);
+            }
             50% {
-                transform: scale(1.18);
+                transform: scale(1.0);
+            }
+            75% {
+                transform: scale(1.27);
             }
             100% {
                 transform: scale(1.0);
@@ -502,10 +525,56 @@ class SlideGeneratorAgent:
 
     <script>
         (function() {
+            var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
-            if (slides && slides.length > 1) {
+            var slideInterval = null;
+
+            function applyDuration(durSec) {
+                if (!durSec || !isFinite(durSec) || durSec <= 0) return;
+                var dur = Math.round(durSec * 10) / 10;
+                document.documentElement.style.setProperty('--slide-audio-duration', dur + 's');
+
+                // Si hay más de una foto, adaptar la velocidad de rotación proporcionalmente al audio
+                if (slides && slides.length > 1) {
+                    if (slideInterval) clearInterval(slideInterval);
+                    var durationPerSlideMs = Math.max(4000, Math.round((dur / slides.length) * 1000));
+                    var currentIndex = 0;
+                    slideInterval = setInterval(function() {
+                        slides[currentIndex].classList.remove('active');
+                        currentIndex = (currentIndex + 1) % slides.length;
+                        slides[currentIndex].classList.add('active');
+                    }, durationPerSlideMs);
+                }
+            }
+
+            // 1. Escuchar metadata del audio embebido
+            if (audio) {
+                var syncFromAudio = function() {
+                    if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+                        applyDuration(audio.duration);
+                    }
+                };
+                audio.addEventListener('loadedmetadata', syncFromAudio);
+                audio.addEventListener('durationchange', syncFromAudio);
+                audio.addEventListener('canplay', syncFromAudio);
+                if (audio.readyState >= 1) {
+                    syncFromAudio();
+                }
+            }
+
+            // 2. Escuchar postMessage enviado desde el reproductor padre (VideoSection / NewsSlidePlayer)
+            window.addEventListener('message', function(e) {
+                if (e.data && (e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION')) {
+                    if (e.data.duration) {
+                        applyDuration(e.data.duration);
+                    }
+                }
+            });
+
+            // Fallback para rotación si no hay audio o tarda en responder
+            if (slides && slides.length > 1 && !slideInterval) {
                 var currentIndex = 0;
-                setInterval(function() {
+                slideInterval = setInterval(function() {
                     slides[currentIndex].classList.remove('active');
                     currentIndex = (currentIndex + 1) % slides.length;
                     slides[currentIndex].classList.add('active');
@@ -522,7 +591,8 @@ class SlideGeneratorAgent:
                 title=title,
                 text=text,
                 audio_url=audio_url or "",
-                images=images or []
+                images=images or [],
+                audio_duration=audio_duration
             )
         else:
             # Fallback simple sin jinja2
@@ -530,7 +600,9 @@ class SlideGeneratorAgent:
             img_url = first_img.get("url", first_img) if isinstance(first_img, dict) else first_img
             fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
             fy = first_img.get("focal_y", 45) if isinstance(first_img, dict) else 45
+            dur_str = str(round(audio_duration, 1) if audio_duration else 36)
             html = template_str.replace("{{ title }}", title).replace("{{ text }}", text).replace("{{ audio_url }}", audio_url or "")
+            html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
             return html
 
@@ -587,11 +659,12 @@ class SlideGeneratorAgent:
         return None
 
     def process_article_slide(self, article_id: Union[int, str], title: str, text: str,
-                              audio_url: str = "", image_urls: Optional[List[str]] = None) -> Optional[str]:
+                              audio_url: str = "", image_urls: Optional[List[str]] = None,
+                              audio_duration: Optional[float] = None) -> Optional[str]:
         """
         Procesa el ciclo completo para un artículo:
         1. Optimización de imágenes
-        2. Renderizado del template HTML con voz y diseño
+        2. Renderizado del template HTML con voz y diseño (Ken Burns 2 ciclos adaptados al audio)
         3. Generación de nombre único de archivo
         4. Subida al bucket 'slides' de Supabase Storage
         5. Retorna la URL pública del slide
@@ -606,7 +679,8 @@ class SlideGeneratorAgent:
                 title=title,
                 text=text,
                 audio_url=audio_url or "",
-                images=images
+                images=images,
+                audio_duration=audio_duration
             )
 
             filename = self.generate_slide_filename(article_id, title)
@@ -685,13 +759,15 @@ class SlideGeneratorAgent:
                                 img_list.append(s)
 
                     audio_url = article.get('audio_url') or ''
+                    audio_dur = article.get('audio_duration')
 
                     slide_url = self.process_article_slide(
                         article_id=article_id,
                         title=article.get('title') or 'Sin título',
                         text=article.get('text') or '',
                         audio_url=audio_url,
-                        image_urls=img_list
+                        image_urls=img_list,
+                        audio_duration=audio_dur
                     )
                     results[article_id] = slide_url
                 else:

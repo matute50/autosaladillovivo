@@ -273,7 +273,8 @@ class OrchestratorAgent:
                     title=title,
                     text=text,
                     audio_url=audio_url,
-                    image_urls=image_urls
+                    image_urls=image_urls,
+                    audio_duration=art.get('audio_duration')
                 )
                 if slide_url:
                     art['url_slide'] = slide_url

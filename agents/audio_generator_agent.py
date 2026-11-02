@@ -363,7 +363,8 @@ class AudioGeneratorAgent:
                     buf_combined = io.BytesIO()
                     combined_audio.export(buf_combined, format="mp3", bitrate="128k")
                     audio_bytes = buf_combined.getvalue()
-                    logger.info(f"Audio ensamblado con éxito: Noticia ({len(seg_news)/1000:.1f}s) + Silencio (1.0s) + Cierre ({len(seg_closing)/1000:.1f}s)")
+                    self.last_audio_duration = round(len(combined_audio) / 1000.0, 1)
+                    logger.info(f"Audio ensamblado con éxito: Noticia ({len(seg_news)/1000:.1f}s) + Silencio (1.0s) + Cierre ({len(seg_closing)/1000:.1f}s) — Total: {self.last_audio_duration}s")
             except Exception as e:
                 logger.warning(f"Error combinando segmentos de audio con pydub ({e}). Aplicando fallback.")
 
@@ -410,6 +411,8 @@ class AudioGeneratorAgent:
             )
             results[art_id] = audio_url
             art['audio_url'] = audio_url
+            if hasattr(self, 'last_audio_duration') and self.last_audio_duration:
+                art['audio_duration'] = self.last_audio_duration
             time.sleep(1.5)  # Cortesía entre llamadas de TTS
 
         return results
