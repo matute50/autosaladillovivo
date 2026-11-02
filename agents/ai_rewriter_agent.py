@@ -98,7 +98,7 @@ class AiRewriterAgent:
             },
         }
 
-    def _clamp_title_to_max_words(self, title: str, max_words: int = 6) -> str:
+    def _clamp_title_to_max_words(self, title: str, max_words: int = 8) -> str:
         """Limita un título al número máximo de palabras permitidas."""
         words = title.strip().split()
         if len(words) <= max_words:
@@ -145,9 +145,9 @@ DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
    - CERO REPETICIÓN: Cada frase debe sumar un dato nuevo. No repitas palabras ni ideas entre el inicio y el cierre.
    - FONÉTICA Y ACENTUACIÓN RIOPLATENSE: Cuida la correcta acentuación en verbos y términos locales (llegó, anunció, inauguró, continuará).
 
-3. TÍTULO GANCHO PARA IMAGEN (MÁXIMO 6 PALABRAS - OBLIGATORIO):
+3. TÍTULO GANCHO PARA IMAGEN (MÁXIMO 8 PALABRAS - OBLIGATORIO):
    - Este título se superpone sobre la foto en portada, slides y tarjetas de noticia.
-   - DEBE TENER ENTRE 3 Y 6 PALABRAS EXACTAMENTE (prohibido exceder las 6).
+   - DEBE TENER ENTRE 3 Y 8 PALABRAS EXACTAMENTE (prohibido exceder las 8).
    - Potente, directo y enérgico: provoca intriga e impacto inmediato en quien ve la imagen.
    - Sin palabras vacías ni misterio: el lector entiende el tema al instante.
    - Ejemplos:
@@ -155,6 +155,7 @@ DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
      * "Inauguran nuevo polideportivo municipal"
      * "Alerta por tormentas fuertes"
      * "Homenaje a Aída Friggieri"
+     * "Gran festejo por el aniversario"
 
 4. META DESCRIPCIÓN Y ETIQUETAS:
    - Meta descripción SEO concisa de máximo 155 caracteres.
@@ -302,11 +303,11 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
         Reestructura el texto con reglas de estilo periodístico radial de Saladillo Vivo
-        y título gancho de MÁXIMO 6 PALABRAS (para gancho sobre imagen).
+        y título gancho de MÁXIMO 8 PALABRAS (para gancho sobre imagen).
         """
-        # Limpiar y condensar a título gancho de MÁXIMO 6 PALABRAS
+        # Limpiar y condensar a título gancho de MÁXIMO 8 PALABRAS
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
-        hook_title = self._clamp_title_to_max_words(clean_title, max_words=6)
+        hook_title = self._clamp_title_to_max_words(clean_title, max_words=8)
 
         paragraphs = [p.strip() for p in content.split('\n') if len(p.strip()) > 30]
         if not paragraphs:

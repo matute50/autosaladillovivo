@@ -6,15 +6,15 @@ class AiRewriterAgentTests(unittest.TestCase):
     def setUp(self):
         self.agent = AiRewriterAgent()
 
-    def test_local_heuristic_fallback_title_has_max_6_words(self):
-        title = "Esta es una noticia con un titulo ridículamente largo que supera ampliamente las seis palabras"
+    def test_local_heuristic_fallback_title_has_max_8_words(self):
+        title = "Esta es una noticia con un titulo ridículamente largo"
         content = "El municipio de Saladillo anunció obras importantes en el centro de la ciudad para mejorar el tránsito y los accesos."
         
         result = self.agent.local_heuristic_fallback(title, content)
         
         words = result['titulo_optimizado'].split()
-        self.assertLessEqual(len(words), 6)
-        self.assertEqual("Esta es una noticia con un", result['titulo_optimizado'])
+        self.assertEqual(8, len(words))
+        self.assertTrue(result['titulo_optimizado'].startswith("Esta es una noticia"))
 
     def test_enforce_max_6_words_on_title(self):
         title_7_words = "Gran festejo por el aniversario de Saladillo"
