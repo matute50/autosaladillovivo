@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-agents/ai_rewriter_agent.py — Agente de Modificación y Enriquecimiento con IA
-============================================================================
-Paso 3 del ciclo: Modifica y optimiza el título, el cuerpo de la noticia, la bajada SEO
-y las etiquetas editoriales con enfoque "Free-First":
-1. GLM-4 (Zhipu AI) -> Primario, cuota gratuita amplia y permanente.
-2. Google Gemini (1.5-flash) -> Secundario, alta velocidad y gratuito.
-3. OpenAI (GPT-4o-mini) -> Terciario, comercial como fallback.
-4. Fallback Heurístico Periodístico Local -> Sin dependencia externa ni fallo posible.
+agents/ai_rewriter_agent.py — Agente de Reescritura Periodística con IA (Free-First)
+======================================================================================
+Paso 3 del ciclo: Reestructura títulos, textos y metadatos de noticias scrapedas
+bajo estricto estilo periodístico rioplatense bonaerense para Saladillo Vivo.
+
+Características:
+- Enfoque Free-First: prioriza proveedores gratuitos (GLM → Groq → Gemini → OpenRouter → OpenAI).
+- Fallback heurístico local funcional sin APIs externas.
+- Directivas editoriales para noticiero radial (TTS) y gancho de imagen (máx 6 palabras).
+- Compatibilidad total con JSON estricto y respuestas flexibles de LLM.
 """
 
 import os
@@ -15,15 +17,18 @@ import sys
 import json
 import re
 import unicodedata
+import logging
 from datetime import datetime
+from typing import Dict, Optional, List, Union
 
 try:
     import requests
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
-    import urllib.request
-    import urllib.error
+
+logger = logging.getLogger("AiRewriterAgent")
+logger.setLevel(logging.INFO)
 
 
 def load_env_variables():
@@ -40,7 +45,7 @@ def load_env_variables():
                         line = line.strip()
                         if line and not line.startswith('#') and '=' in line:
                             k, v = line.split('=', 1)
-                            env[k.strip()] = v.strip().strip("'\"")
+                            env[k.strip()] = v.strip().strip('"\'')
             except Exception:
                 pass
 
@@ -50,6 +55,8 @@ def load_env_variables():
 class AiRewriterAgent:
     """
     Agente de IA especializado en reescritura periodística local para Saladillo Vivo.
+    Transforma noticias scrapedas en formatos listos para TTS (locución radial)
+    y gancho de imagen (máx 6 palabras), con estilo rioplatense bonaerense.
     """
     def __init__(self):
         self.env = load_env_variables()
@@ -88,8 +95,15 @@ class AiRewriterAgent:
                 'key': self.env.get('OPENAI_API_KEY'),
                 'model': self.env.get('OPENAI_MODEL', 'gpt-4o-mini'),
                 'priority': 5
-            }
+            },
         }
+
+    def _clamp_title_to_max_words(self, title: str, max_words: int = 6) -> str:
+        """Limita un título al número máximo de palabras permitidas."""
+        words = title.strip().split()
+        if len(words) <= max_words:
+            return title.strip()
+        return " ".join(words[:max_words]).rstrip(' ,.:;')
 
     def create_prompt(self, title, content):
         """Genera el prompt periodístico estricto para estructurar la noticia."""
@@ -105,7 +119,7 @@ CONTENIDO ORIGINAL:
 FILTRO EDITORIAL REGIONAL ESTRICTO:
 "Saladillo Vivo" publica ÚNICAMENTE noticias locales (Saladillo, Del Carril, Cazón, Polvaredas, Álvarez de Toledo) y regionales (partidos vecinos: Roque Pérez, 25 de Mayo, General Alvear, Las Flores, Lobos, Tapalqué, interior bonaerense).
 Si el despacho corresponde a una noticia de orden NACIONAL o INTERNACIONAL sin anclaje local (ejemplos: política exterior o conflictos de otros países, inflación o economía nacional macro sin impacto local, fútbol de Primera División/AFA como Boca/River sin jugador local, lanzamientos comerciales de autos, farándula/espectáculos nacionales), DEBES RECHAZARLA respondiendo exactamente:
-{{\"es_local_regional\": false, \"motivo_rechazo\": \"Noticia nacional/internacional sin anclaje local\"}}
+{{"es_local_regional": false, "motivo_rechazo": "Noticia nacional/internacional sin anclaje local"}}
 
 Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumple las siguientes:
 
@@ -131,14 +145,26 @@ DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
    - CERO REPETICIÓN: Cada frase debe sumar un dato nuevo. No repitas palabras ni ideas entre el inicio y el cierre.
    - FONÉTICA Y ACENTUACIÓN RIOPLATENSE: Cuida la correcta acentuación en verbos y términos locales (llegó, anunció, inauguró, continuará).
 
-3. META DESCRIPCIÓN Y ETIQUETAS:
+3. TÍTULO GANCHO PARA IMAGEN (MÁXIMO 6 PALABRAS - OBLIGATORIO):
+   - Este título se superpone sobre la foto en portada, slides y tarjetas de noticia.
+   - DEBE TENER ENTRE 3 Y 6 PALABRAS EXACTAMENTE (prohibido exceder las 6).
+   - Potente, directo y enérgico: provoca intriga e impacto inmediato en quien ve la imagen.
+   - Sin palabras vacías ni misterio: el lector entiende el tema al instante.
+   - Ejemplos:
+     * "Corte de luz en Saladillo"
+     * "Inauguran nuevo polideportivo municipal"
+     * "Alerta por tormentas fuertes"
+     * "Homenaje a Aída Friggieri"
+
+4. META DESCRIPCIÓN Y ETIQUETAS:
    - Meta descripción SEO concisa de máximo 155 caracteres.
    - 4 a 6 palabras clave locales ("Saladillo", etc.).
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
   "es_local_regional": true,
-  "titulo_optimizado": "Titular radial corto y directo en presente (máximo 12 palabras)",
+  "titulo_radial": "Titular radial corto y directo en presente (máximo 12 palabras)",
+  "titulo_gancho_imagen": "Gancho imagen máx 6 palabras",
   "contenido_optimizado": "Texto radial breve de 80 a 110 palabras en voz activa...",
   "meta_description": "Resumen conciso para SEO...",
   "palabras_clave": ["Saladillo", "tema1", "tema2"]
@@ -275,15 +301,12 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
     def local_heuristic_fallback(self, title, content):
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
-        Reestructura el texto con reglas de estilo periodístico radial de Saladillo Vivo y titular de máx 12 palabras.
+        Reestructura el texto con reglas de estilo periodístico radial de Saladillo Vivo
+        y título gancho de MÁXIMO 6 PALABRAS (para gancho sobre imagen).
         """
-        # Limpiar y condensar a titular radial de máximo 12 palabras
+        # Limpiar y condensar a título gancho de MÁXIMO 6 PALABRAS
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
-        words = clean_title.split()
-        if len(words) > 12:
-            hook_title = " ".join(words[:12]).rstrip(' ,.:;')
-        else:
-            hook_title = clean_title
+        hook_title = self._clamp_title_to_max_words(clean_title, max_words=6)
 
         paragraphs = [p.strip() for p in content.split('\n') if len(p.strip()) > 30]
         if not paragraphs:
@@ -382,10 +405,15 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 
                 if ai_result:
                     # Mapeo flexible de nombres de claves devueltos por el LLM
-                    if 'titulo_optimizado' not in ai_result:
-                        for alt in ['titulo', 'title', 'TITULAR RADIAL', 'titular_radial', 'titular', 'titulo_radial']:
+                    if 'titulo_radial' not in ai_result:
+                        for alt in ['titulo', 'title', 'TITULAR RADIAL', 'titular_radial', 'titular', 'titulo_radial', 'titulo_optimizado']:
                             if alt in ai_result and ai_result[alt]:
-                                ai_result['titulo_optimizado'] = str(ai_result[alt]).strip()
+                                ai_result['titulo_radial'] = str(ai_result[alt]).strip()
+                                break
+                    if 'titulo_gancho_imagen' not in ai_result:
+                        for alt in ['titulo_gancho_imagen', 'titulo_gancho', 'gancho_imagen', 'image_hook', 'gancho']:
+                            if alt in ai_result and ai_result[alt]:
+                                ai_result['titulo_gancho_imagen'] = str(ai_result[alt]).strip()
                                 break
                     if 'contenido_optimizado' not in ai_result:
                         for alt in ['contenido', 'content', 'CUERPO', 'cuerpo', 'cuerpo_noticia', 'texto', 'despacho']:
@@ -393,7 +421,7 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                                 ai_result['contenido_optimizado'] = str(ai_result[alt]).strip()
                                 break
 
-                if ai_result and ai_result.get('titulo_optimizado'):
+                if ai_result and ai_result.get('titulo_radial'):
                     used_provider = prov['name']
                     print(f"    -> IA exitosa con {used_provider}")
                     break
@@ -413,10 +441,15 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             }
 
         # Si ningún proveedor externo funcionó, aplicar fallback local
-        if not ai_result or not ai_result.get('titulo_optimizado'):
+        if not ai_result or not ai_result.get('titulo_radial'):
             print("    -> Aplicando Fallback Heurístico Local Periodístico")
             ai_result = self.local_heuristic_fallback(title, content)
             used_provider = 'Fallback Heurístico Local'
+
+        # Construir titulo_gancho_imagen si no vino (clamp a 6 palabras del radial o título original)
+        if 'titulo_gancho_imagen' not in ai_result or not ai_result.get('titulo_gancho_imagen'):
+            source_for_hook = ai_result.get('titulo_radial') or ai_result.get('titulo_optimizado') or title
+            ai_result['titulo_gancho_imagen'] = self._clamp_title_to_max_words(source_for_hook, max_words=6)
 
         # Limitar meta_description estrictamente a <= 155 caracteres para SEO
         raw_meta = ai_result.get('meta_description') or title[:150]
@@ -425,13 +458,14 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             meta_desc = meta_desc[:152].rsplit(' ', 1)[0] + '...'
 
         feature_status = self.calculate_priority_score(
-            ai_result.get('titulo_optimizado', title),
+            ai_result.get('titulo_radial', title),
             ai_result.get('contenido_optimizado', content),
             image_url
         )
 
         return {
-            'titulo_ia': ai_result.get('titulo_optimizado', title),
+            'titulo_ia': ai_result.get('titulo_radial', title),          # Título radial (hasta 12 palabras)
+            'titulo_gancho_imagen': ai_result.get('titulo_gancho_imagen', ''),  # Gancho imagen (máx 6 palabras)
             'contenido_ia': ai_result.get('contenido_optimizado', content),
             'meta_description': meta_desc,
             'meta_keywords': ai_result.get('palabras_clave', ['Saladillo']),

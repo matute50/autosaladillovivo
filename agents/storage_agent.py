@@ -210,7 +210,7 @@ class StorageAgent:
         }
 
         if ai_data:
-            title = ai_data.get('titulo_ia') or ai_data.get('title')
+            title = ai_data.get('titulo_radial') or ai_data.get('titulo_ia') or ai_data.get('title')
             content = ai_data.get('contenido_ia') or ai_data.get('text')
             description = ai_data.get('meta_description') or ai_data.get('description')
             feature_status = ai_data.get('featureStatus') or 'secondary'
@@ -231,6 +231,14 @@ class StorageAgent:
             if feature_status:
                 patch_payload['featureStatus'] = feature_status
             patch_payload['status'] = 'ai_processed'
+
+            # Guardar también los nuevos campos si existen en la tabla
+            hook_title = ai_data.get('titulo_gancho_imagen') or ai_data.get('titulo_gancho')
+            if hook_title:
+                patch_payload['titulo_gancho_imagen'] = hook_title
+            radial_title = ai_data.get('titulo_radial')
+            if radial_title:
+                patch_payload['titulo_radial'] = radial_title
 
         final_audio_url = audio_url or (ai_data.get('audio_url') if ai_data else None)
         final_slide_url = slide_url or (ai_data.get('url_slide') or ai_data.get('slide_url') if ai_data else None)
