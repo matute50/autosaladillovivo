@@ -225,10 +225,28 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
           </div>
         )}
 
+        {/* Botón Play centrado en la imagen */}
+        <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+          <div
+            className={cn(
+              "flex items-center justify-center rounded-full border border-white/80 shadow-2xl shadow-black/70 backdrop-blur-md bg-black/45 transition-all duration-300",
+              "group-hover:bg-[#003399] group-hover:scale-110 group-hover:border-white group-hover:shadow-[0_0_20px_rgba(0,102,255,0.6)]",
+              isFeatured ? "w-14 h-14 sm:w-16 sm:h-16" : "w-10 h-10 sm:w-11 sm:h-11"
+            )}
+          >
+            <Play
+              size={isFeatured ? 28 : 20}
+              fill="white"
+              className="text-white drop-shadow-md translate-x-0.5"
+              strokeWidth={1.5}
+            />
+          </div>
+        </div>
+
         {/* Título responsivo sobre la imagen que se muestra completo */}
         <div className={cn(
           "absolute bottom-0 left-0 w-full z-30 flex flex-col justify-end max-h-[82%]",
-          isFeatured ? "p-3 sm:p-4 md:p-5 pr-14 sm:pr-16" : "p-2 sm:p-2.5 md:p-3 pr-10 sm:pr-12"
+          isFeatured ? "p-3 sm:p-4 md:p-5" : "p-2 sm:p-2.5 md:p-3"
         )}>
           <h3
             style={{
@@ -243,21 +261,6 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
             {title}
           </h3>
         </div>
-
-        {/* Indicador de Play sutil en esquina inferior derecha */}
-        {isPlayable && (
-            <div className={cn(
-                "absolute bottom-2 right-2 flex items-center justify-center rounded-full p-0.5 border border-white/70 shadow-lg shadow-black/50 backdrop-blur-md bg-black/40 group-hover:!bg-[#003399] group-hover:border-white group-hover:bg-opacity-100 z-30",
-                isFeatured ? "w-11 h-11" : "w-8 h-8"
-            )}>
-                 <Play
-                    size={isFeatured ? 25 : 18}
-                    fill="white"
-                    className="text-white drop-shadow-lg"
-                    strokeWidth={1.35}
-                 />
-            </div>
-        )}
       </div>
 
     </motion.article>
