@@ -7,7 +7,7 @@ import { Play } from 'lucide-react';
 import { SlideMedia } from '@/lib/types';
 import { format } from 'date-fns';
 import { useNewsPlayerStore } from '@/store/useNewsPlayerStore';
-import { cn } from '@/lib/utils';
+import { cn, getHighResolutionImageUrl } from '@/lib/utils';
 import { usePlayerStore } from '@/store/usePlayerStore';
 import { useVolumeStore } from '@/store/useVolumeStore';
 
@@ -30,23 +30,7 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   const rawTitle = newsItem.title || newsItem.titulo;
   const title = rawTitle ? rawTitle.replace(/\|/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase() : '';
 
-  const getProcessedImageUrl = (inputUrl: string | undefined | null): string => {
-      if (!inputUrl) return '/placeholder.png';
-      
-      const cleanUrl = inputUrl.trim();
-      const ytMatch = cleanUrl.match(YOUTUBE_REGEX);
-      
-      if (ytMatch && ytMatch[1]) {
-          return `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`;
-      }
-      if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
-          return cleanUrl;
-      }
-      const mediaUrlFallback = process.env.NEXT_PUBLIC_MEDIA_URL || 'https://media.saladillovivo.com.ar';
-      return `${mediaUrlFallback}${cleanUrl.startsWith('/') ? cleanUrl : `/${cleanUrl}`}`;
-  };
-
-  const finalImageUrl = getProcessedImageUrl(newsItem.image_url || newsItem.imageUrl);
+  const finalImageUrl = getHighResolutionImageUrl(newsItem.image_url || newsItem.imageUrl);
   
   const createdAt = newsItem.created_at || newsItem.fecha;
   const audioUrl = newsItem.audio_url || newsItem.audioUrl;
@@ -230,10 +214,10 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
           "absolute inset-x-0 bottom-0 z-30 flex flex-col items-center justify-end pointer-events-none",
           isFeatured ? "p-3 sm:p-4 md:p-5" : "p-2 sm:p-2.5 md:p-3"
         )}>
-          {/* Botón Play: en noticia principal 25% más grande y 30px arriba del título */}
+          {/* Botón Play: en noticia principal 25% más grande y 50px arriba del título */}
           <div className={cn(
             "flex items-center justify-center",
-            isFeatured ? "mb-[30px]" : "mb-[20px]"
+            isFeatured ? "mb-[50px]" : "mb-[20px]"
           )}>
             <div
               className={cn(
