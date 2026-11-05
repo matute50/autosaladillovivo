@@ -214,16 +214,18 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
           "absolute inset-x-0 bottom-0 z-30 flex flex-col items-center justify-end pointer-events-none",
           isFeatured ? "p-3 sm:p-4 md:p-5" : "p-2 sm:p-2.5 md:p-3"
         )}>
-          {/* Botón Play: en noticia principal 25% más grande y 50px arriba del título */}
+          {/* Botón Play: en noticia principal 25% más grande y 60px arriba del título */}
           <div className={cn(
             "flex items-center justify-center",
-            isFeatured ? "mb-[50px]" : "mb-[20px]"
+            isFeatured ? "mb-[60px]" : "mb-[20px]"
           )}>
             <div
               className={cn(
                 "flex items-center justify-center rounded-full border border-white/80 shadow-2xl shadow-black/70 backdrop-blur-md bg-black/45 transition-all duration-300",
-                "group-hover:bg-[#003399] group-hover:scale-110 group-hover:border-white group-hover:shadow-[0_0_20px_rgba(0,102,255,0.6)]",
-                isFeatured ? "w-[70px] h-[70px] sm:w-[80px] sm:h-[80px]" : "w-10 h-10 sm:w-11 sm:h-11"
+                "group-hover:bg-[#003399] group-hover:scale-110 group-hover:border-white",
+                isFeatured
+                  ? "w-[70px] h-[70px] sm:w-[80px] sm:h-[80px] group-hover:shadow-[0_0_40px_rgba(0,102,255,0.95),0_0_75px_rgba(0,153,255,0.65)]"
+                  : "w-10 h-10 sm:w-11 sm:h-11 group-hover:shadow-[0_0_25px_rgba(0,102,255,0.75)]"
               )}
             >
               <Play

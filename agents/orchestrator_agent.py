@@ -282,6 +282,15 @@ class OrchestratorAgent:
                 if not image_urls and art.get('image_url'):
                     image_urls = [art.get('image_url')]
 
+                # Garantizar que todas las URLs de imágenes se pasen al slide en máxima resolución Full HD
+                clean_hd_gallery = []
+                for u in image_urls:
+                    if u and isinstance(u, str):
+                        norm_u = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', u, flags=re.I)
+                        if norm_u not in clean_hd_gallery:
+                            clean_hd_gallery.append(norm_u)
+                image_urls = clean_hd_gallery or image_urls
+
                 slide_url = self.slide_agent.process_article_slide(
                     article_id=art_id,
                     title=title,

@@ -17,6 +17,7 @@ Características:
 import os
 import io
 import sys
+import re
 import time
 import hashlib
 import logging
@@ -159,7 +160,8 @@ class SlideGeneratorAgent:
 
     def enhance_image_ai(self, image_bytes: bytes) -> bytes:
         """
-        Mejora automáticamente brillo, contraste e intensidad (saturación) con perfil cinematográfico TV.
+        Mejora automáticamente brillo, contraste e intensidad (saturación) con perfil cinematográfico TV
+        y garantiza alta resolución Full HD sin artefactos de compresión.
         """
         if not HAS_PIL:
             return image_bytes
@@ -168,6 +170,17 @@ class SlideGeneratorAgent:
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
+
+            # Si la imagen posee dimensiones bajas (< 1200px de ancho y < 800px de alto),
+            # reescalarla a Full HD cinematográfico con interpolación Lanczos de alta fidelidad
+            orig_w, orig_h = img.size
+            if orig_w < 1200 and orig_h < 800 and orig_w > 0 and orig_h > 0:
+                scale = min(1920 / orig_w, 1080 / orig_h)
+                if scale > 1.0:
+                    new_w = int(orig_w * scale)
+                    new_h = int(orig_h * scale)
+                    resampling = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.BICUBIC)
+                    img = img.resize((new_w, new_h), resample=resampling)
 
             # 1. Autocontraste suave para estirar el rango dinámico
             img = ImageOps.autocontrast(img, cutoff=0.3)
@@ -199,7 +212,8 @@ class SlideGeneratorAgent:
             img = ImageEnhance.Sharpness(img).enhance(1.12)
 
             buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=88, optimize=True)
+            # CALIDAD CINEMATOGRÁFICA MÁXIMA Full HD (quality=95, subsampling=0 para cero artefactos en TV)
+            img.save(buf, format='JPEG', quality=95, optimize=True, subsampling=0)
             return buf.getvalue()
 
         except Exception as e:
@@ -339,10 +353,11 @@ class SlideGeneratorAgent:
 
     def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
         """
-        Procesa, analiza y optimiza imágenes para el slide:
-        1. Determina centro de atención (rostro único, punto medio de rostros, o cuerpo/objeto).
-        2. Aplica mejora automática de brillo, contraste e intensidad de color.
-        3. Aloja la versión optimizada en Supabase Storage.
+        Procesa, analiza y optimiza imágenes para el slide garantizando MÁXIMA RESOLUCIÓN FULL HD:
+        1. Desescala URLs de WordPress a la versión original limpia sin sufijos de recorte (-80x80, etc.).
+        2. Determina centro de atención con visión artificial (rostro, equidistante o saliente).
+        3. Aplica reescalado inteligente Lanczos a Full HD y realce de imagen cinematográfico TV.
+        4. Aloja la versión optimizada en Supabase Storage (JPEG Q95 subsampling=0).
         Retorna una lista de diccionarios con URL, coordenadas focales (focal_x, focal_y) y método.
         """
         processed_images: List[Dict] = []
@@ -351,41 +366,77 @@ class SlideGeneratorAgent:
             return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
 
         for i, image_url in enumerate(image_urls):
-            if not image_url:
+            if not image_url or not isinstance(image_url, str):
+                continue
+
+            # Descartar avatares, logos o miniaturas explícitas que no sean contenido del artículo
+            lower_url = image_url.lower()
+            if any(k in lower_url for k in ['gravatar', 'avatar', 'logo', 'icon', 'pixel', 'banner']):
                 continue
 
             if image_url.startswith("http://") or image_url.startswith("https://"):
                 try:
+                    # Desescalar a URL nativa Full HD sin sufijos de recorte de WordPress
+                    clean_hd_url = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', image_url, flags=re.I)
+                    # Quitar params de resize en Jetpack/Photon
+                    if '?' in clean_hd_url:
+                        base_u, q_u = clean_hd_url.split('?', 1)
+                        kept = [p for p in q_u.split('&') if not p.lower().startswith(('resize=', 'fit=', 'w=', 'h=', 'strip='))]
+                        clean_hd_url = base_u + ('?' + '&'.join(kept) if kept else '')
+
+                    # Intentar descargar la versión Full HD primero, luego fallback a la original
+                    candidate_urls = [clean_hd_url] if clean_hd_url != image_url else [image_url]
+                    if clean_hd_url != image_url:
+                        candidate_urls.append(image_url)
+
+                    resp = None
+                    downloaded_url = image_url
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+                    }
+
                     if HAS_REQUESTS:
-                        resp = requests.get(image_url, timeout=12, headers={'User-Agent': 'Mozilla/5.0'})
-                        if resp.status_code == 200:
-                            raw_bytes = resp.content
+                        for cand in candidate_urls:
+                            try:
+                                r = requests.get(cand, timeout=14, headers=headers)
+                                if r.status_code == 200 and len(r.content) > 1500:
+                                    resp = r
+                                    downloaded_url = cand
+                                    break
+                            except Exception:
+                                pass
 
-                            # 1. Determinar centro de atención con visión artificial
-                            focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
+                    if resp and resp.status_code == 200:
+                        raw_bytes = resp.content
 
-                            # 2. Mejorar brillo, contraste e intensidad automáticamente
-                            enhanced_bytes = self.enhance_image_ai(raw_bytes)
+                        # 1. Determinar centro de atención con visión artificial
+                        focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
 
-                            # 3. Subir imagen mejorada a Supabase Storage
-                            img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
-                            filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
-                            uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
-                            final_url = uploaded_url or image_url
+                        # 2. Mejorar brillo, contraste e intensidad en resolución Full HD
+                        enhanced_bytes = self.enhance_image_ai(raw_bytes)
 
-                            processed_images.append({
-                                "url": final_url,
-                                "focal_x": focal_x,
-                                "focal_y": focal_y,
-                                "method": method
-                            })
-                            continue
+                        # 3. Subir imagen Full HD optimizada a Supabase Storage
+                        img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
+                        filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
+                        uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
+                        final_url = uploaded_url or downloaded_url
+
+                        processed_images.append({
+                            "url": final_url,
+                            "focal_x": focal_x,
+                            "focal_y": focal_y,
+                            "method": method
+                        })
+                        continue
 
                 except Exception as e:
                     self.logger.warning(f"Error procesando imagen {i} para artículo {article_id}: {e}")
 
+            # Fallback seguro con desescalado a Full HD
+            fallback_url = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', image_url, flags=re.I)
             processed_images.append({
-                "url": image_url,
+                "url": fallback_url,
                 "focal_x": 50.0,
                 "focal_y": 45.0,
                 "method": "fallback"
@@ -482,6 +533,10 @@ class SlideGeneratorAgent:
             width: 100%;
             height: 100%;
             object-fit: cover;
+            image-rendering: high-quality;
+            image-rendering: -webkit-optimize-contrast;
+            backface-visibility: hidden;
+            transform: translateZ(0);
             will-change: transform;
             animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
