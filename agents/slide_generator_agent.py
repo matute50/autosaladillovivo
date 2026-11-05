@@ -93,6 +93,65 @@ class SlideGeneratorAgent:
         duration = (words / 2.08) + 1.0 + 3.0
         return max(20.0, min(round(duration, 1), 120.0))
 
+    def detect_banner_or_sign_title(self, gray, w, h):
+        """
+        Detecta el título principal dentro de un cartel, banner o fotografía de letrero:
+        Identifica la línea de texto con mayor tamaño tipográfico (altura de caracteres),
+        mayor extensión horizontal y ponderación de ubicación en el tercio/mitad superior.
+        Retorna (title_x, title_y, found_title).
+        """
+        total_area = float(w * h)
+
+        # Gradiente morfológico para aislar los trazos de caracteres tipográficos
+        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+
+        # Conectar caracteres horizontales para agrupar palabras en líneas de titular
+        kernel_line = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 4))
+        connected = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_line)
+        contours, _ = cv2.findContours(connected, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        candidates = []
+        for c in contours:
+            x, y, bw, bh = cv2.boundingRect(c)
+            area = bw * bh
+            # Descartar marcos exteriores gigantes (área > 35% del total o ancho > 95%)
+            if area > 0.35 * total_area or bw > 0.95 * w or bh > 0.90 * h:
+                continue
+
+            ratio = bw / float(bh) if bh > 0 else 0
+            # Bloque de texto válido para titular: ratio horizontal >= 1.3 y altura mínima apreciable
+            if ratio >= 1.3 and (0.015 * h <= bh <= 0.25 * h) and (0.001 * total_area <= area <= 0.22 * total_area):
+                y_center_pct = (y + bh / 2.0) / float(h)
+                # Bonificación para la mitad superior y media donde se ubican los títulos principales
+                pos_bonus = 1.40 if (0.10 <= y_center_pct <= 0.58) else 0.85
+                # La altura del texto al cuadrado da prioridad exponencial al tamaño tipográfico del titular
+                importance = (bh ** 2) * bw * pos_bonus
+                candidates.append((importance, x, y, bw, bh))
+
+        if candidates:
+            # Agrupar fragmentos de la misma línea de titular (mismo nivel Y)
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            best_imp, tx, ty, tbw, tbh = candidates[0]
+
+            same_line = [c for c in candidates if abs((c[2] + c[4]/2.0) - (ty + tbh/2.0)) < (tbh * 0.75)]
+            if same_line:
+                min_x = min(c[1] for c in same_line)
+                max_x = max(c[1] + c[3] for c in same_line)
+                avg_y = sum(c[2] + c[4]/2.0 for c in same_line) / len(same_line)
+                cx = ((min_x + max_x) / 2.0) / float(w) * 100.0
+                cy = avg_y / float(h) * 100.0
+            else:
+                cx = (tx + tbw / 2.0) / float(w) * 100.0
+                cy = (ty + tbh / 2.0) / float(h) * 100.0
+
+            # Clampeo de seguridad para que el título no quede pegado a bordes extremos
+            cx = max(18.0, min(cx, 82.0))
+            cy = max(18.0, min(cy, 75.0))
+            return round(cx, 1), round(cy, 1), True
+
+        return 50.0, 38.0, False
+
     def detect_attention_center(self, image_bytes: bytes, image_url: str = ""):
         """
         Determina con IA y visión por computadora el punto de atención, encuadre y tipo de composición:
@@ -103,10 +162,11 @@ class SlideGeneratorAgent:
              evita "techo" excesivo anclando el foco vertical entre el 33% y 46% (tercio superior cinematográfico),
              garantizando equilibrio visual entre la imagen original y el zoom in.
 
-        2. BANNERS / FLYERS / AFICHES:
-           - Si la imagen contiene alta densidad de texto, flyer o afiche publicitario:
-             se marca is_banner = True.
-             El zoom in se detiene exactamente al 100% de la superficie para que la información permanezca 100% visible sin recortes.
+        2. BANNERS, AFICHES O FOTOGRAFÍAS A CARTELES/BANNERS:
+           - Si se trata de un banner digital o de una FOTOGRAFÍA TOMADA A UN CARTEL O BANNER:
+             detecta el TÍTULO PRINCIPAL del cartel/banner y lo establece como centro de atención.
+             Aplica la regla de contención del 100% de superficie para que la información permanezca
+             completamente visible sin recortes en la animación Ken Burns.
 
         3. EDIFICIOS / FACHADAS:
            - Detecta carteles o leyendas en la fachada y centra el zoom in sobre la leyenda.
@@ -177,7 +237,7 @@ class SlideGeneratorAgent:
                     return round(float(bx), 1), round(float(by), 1), False, "persona_cuerpo_superior"
 
             # ==================================================================
-            # 2. BANNERS / FLYERS / AFICHES (Detección de texto masivo o placas gráficas)
+            # 2. BANNERS, AFICHES O FOTOGRAFÍAS A CARTELES / BANNERS
             # ==================================================================
             # Detección de densidad morfológica de texto y caracteres
             grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
@@ -204,13 +264,38 @@ class SlideGeneratorAgent:
 
             is_banner_keyword = any(k in url_lower for k in [
                 'banner', 'flyer', 'afiche', 'cartel', 'promo', 'sorteo', 'programa',
-                'taller', 'inscripcion', 'necrolo', 'farmacia', 'cuadro', 'comunicado', 'aviso'
+                'taller', 'inscripcion', 'necrolo', 'farmacia', 'cuadro', 'comunicado', 'aviso',
+                'letrero', 'pasacalle', 'folleto'
             ])
 
-            # Si la densidad de texto es superior al 7% o es afiche con texto
-            if is_banner_keyword or text_coverage > 0.07 or (aspect_ratio < 1.15 and text_coverage > 0.035):
-                self.logger.info(f"Centro de atención: BANNER/AFICHE detectado (cobertura texto: {text_coverage:.1%}). Zoom limitado al 100%.")
-                return 50.0, 50.0, True, f"banner_flyer_100pct_{text_coverage:.2f}"
+            # Detectar si es un banner/afiche directo O una fotografía tomada a un cartel/banner
+            is_direct_banner = is_banner_keyword or text_coverage > 0.07 or (aspect_ratio < 1.15 and text_coverage > 0.035)
+
+            # Buscar si existe una estructura rectangular dominante correspondiente a un cartel fotografiado
+            is_photo_of_banner = False
+            if not is_direct_banner and text_coverage > 0.025:
+                # Buscar paneles rectangulares grandes
+                thresh_inv = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+                panel_contours, _ = cv2.findContours(thresh_inv, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                for pc in panel_contours:
+                    pa = cv2.contourArea(pc)
+                    if 0.15 * total_area < pa < 0.85 * total_area:
+                        peri = cv2.arcLength(pc, True)
+                        approx = cv2.approxPolyDP(pc, 0.04 * peri, True)
+                        if len(approx) == 4:  # Cuadrilátero / Cartel fotografiado
+                            is_photo_of_banner = True
+                            break
+
+            if is_direct_banner or is_photo_of_banner:
+                # Detectar con IA el TÍTULO PRINCIPAL del cartel/banner para fijarlo como centro de atención
+                title_x, title_y, found_title = self.detect_banner_or_sign_title(gray, w, h)
+                focal_x = title_x if found_title else 50.0
+                focal_y = title_y if found_title else 38.0
+
+                desc = "foto_a_cartel_titulo_principal" if is_photo_of_banner else "banner_afiche_titulo_principal"
+                self.logger.info(f"Centro de atención: {desc} en ({focal_x:.1f}%, {focal_y:.1f}%). Criterio banner 100% visible.")
+                # Si es banner digital directo o el cartel ocupa casi todo el plano, activar contención 100%
+                return focal_x, focal_y, True, desc
 
             # ==================================================================
             # 3. EDIFICIOS / FACHADAS (Búsqueda de cartel, letrero o leyenda)
