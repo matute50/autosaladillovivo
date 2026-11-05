@@ -93,70 +93,166 @@ class SlideGeneratorAgent:
         duration = (words / 2.08) + 1.0 + 3.0
         return max(20.0, min(round(duration, 1), 120.0))
 
-    def detect_attention_center(self, image_bytes: bytes):
+    def detect_attention_center(self, image_bytes: bytes, image_url: str = ""):
         """
-        Determina el centro de atención de la imagen utilizando visión por computadora:
-        - Si hay 1 persona: rostro de la persona (altura de los ojos).
-        - Si hay más de 1 persona: punto medio equidistante entre todos los rostros.
-        - Si es un objeto, vehículo o animal: centroide del cuerpo u objeto principal por saliencia.
-        - Fallback editorial: (50.0, 45.0) proporción áurea.
-        Retorna (focal_x_pct, focal_y_pct, method_desc).
+        Determina con IA y visión por computadora el punto de atención, encuadre y tipo de composición:
+
+        1. PERSONAS / ROSTROS (Prioridad Absoluta):
+           - Si hay una o varias personas, el foco siempre son las personas por sobre otros objetos.
+           - Calcula el centro del grupo/persona y aplica control de Headroom visual:
+             evita "techo" excesivo anclando el foco vertical entre el 33% y 46% (tercio superior cinematográfico),
+             garantizando equilibrio visual entre la imagen original y el zoom in.
+
+        2. BANNERS / FLYERS / AFICHES:
+           - Si la imagen contiene alta densidad de texto, flyer o afiche publicitario:
+             se marca is_banner = True.
+             El zoom in se detiene exactamente al 100% de la superficie para que la información permanezca 100% visible sin recortes.
+
+        3. EDIFICIOS / FACHADAS:
+           - Detecta carteles o leyendas en la fachada y centra el zoom in sobre la leyenda.
+           - Si no hay cartel, encuadra con equilibrio visual arquitectónico en la fachada.
+
+        Retorna: (focal_x_pct, focal_y_pct, is_banner, method_desc)
         """
         if not HAS_CV2 or not HAS_NUMPY:
-            return 50.0, 45.0, "fallback_sin_cv"
+            return 50.0, 45.0, False, "fallback_sin_cv"
 
         try:
             nparr = np.frombuffer(image_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img_bgr is None:
-                return 50.0, 45.0, "error_decodificacion"
+                return 50.0, 45.0, False, "error_decodificacion"
 
             h, w = img_bgr.shape[:2]
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+            total_area = float(w * h)
 
-            # 1. Detección de rostros humanos (frontal)
+            # ==================================================================
+            # 1. PERSONAS / ROSTROS (PRIORIDAD ABSOLUTA SOBRE CUALQUIER OTRO OBJETO)
+            # ==================================================================
             face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+            profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+            upperbody_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_upperbody.xml')
 
-            if len(faces) == 1:
-                x, y, fw, fh = faces[0]
-                cx = (x + fw / 2.0) / w * 100.0
-                cy = (y + fh * 0.45) / h * 100.0
-                self.logger.info(f"Centro de atención: 1 rostro en ({cx:.1f}%, {cy:.1f}%)")
-                return round(float(cx), 1), round(float(cy), 1), "rostro_persona"
+            faces = list(face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28)))
+            if not faces and not profile_cascade.empty():
+                profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+                if len(profiles) > 0:
+                    faces = list(profiles)
 
-            elif len(faces) > 1:
-                # Punto medio equidistante entre todos los rostros detectados
-                avg_x = sum((x + fw / 2.0) for (x, y, fw, fh) in faces) / len(faces)
-                avg_y = sum((y + fh * 0.45) for (x, y, fw, fh) in faces) / len(faces)
-                cx = (avg_x / w) * 100.0
-                cy = (avg_y / h) * 100.0
-                self.logger.info(f"Centro de atención: {len(faces)} rostros equidistante en ({cx:.1f}%, {cy:.1f}%)")
-                return round(float(cx), 1), round(float(cy), 1), f"equidistante_{len(faces)}_personas"
+            if faces:
+                # Centro horizontal ponderado de todos los rostros del grupo
+                min_x = min(f[0] for f in faces)
+                max_x = max(f[0] + f[2] for f in faces)
+                group_center_x = (min_x + max_x) / 2.0
+                focal_x = (group_center_x / w) * 100.0
 
-            # 2. Detección de objeto / animal / sujeto principal mediante saliencia y contornos
+                # Headroom visual cinematográfico inteligente:
+                # Evita dejar excesivo espacio de 'techo' arriba de las cabezas al hacer zoom in.
+                # Se toma el tope del rostro más alto y se desciende hacia la línea clavicular/pecho
+                # para que al hacer zoom la cabeza quede en el tercio superior armónico (33% - 46%)
+                highest_face_top = min(f[1] for f in faces)
+                avg_face_height = sum(f[3] for f in faces) / len(faces)
+                target_y = highest_face_top + (avg_face_height * 0.90)
+                focal_y = (target_y / h) * 100.0
+
+                # Clampeo de equilibrio visual para evitar techos excesivos
+                focal_y = max(33.0, min(focal_y, 46.0))
+                focal_x = max(20.0, min(focal_x, 80.0))
+
+                desc = f"personas_{len(faces)}_rostros_headroom_balance"
+                self.logger.info(f"Centro de atención: {desc} en ({focal_x:.1f}%, {focal_y:.1f}%)")
+                return round(float(focal_x), 1), round(float(focal_y), 1), False, desc
+
+            # Detección de personas mediante torso superior si los rostros no son frontales
+            if not upperbody_cascade.empty():
+                bodies = upperbody_cascade.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=3, minSize=(60, 60))
+                if len(bodies) > 0:
+                    b = max(bodies, key=lambda x: x[2] * x[3])
+                    bx = (b[0] + b[2] / 2.0) / w * 100.0
+                    by = (b[1] + b[3] * 0.35) / h * 100.0
+                    by = max(33.0, min(by, 46.0))
+                    bx = max(20.0, min(bx, 80.0))
+                    self.logger.info(f"Centro de atención: persona torso en ({bx:.1f}%, {by:.1f}%)")
+                    return round(float(bx), 1), round(float(by), 1), False, "persona_cuerpo_superior"
+
+            # ==================================================================
+            # 2. BANNERS / FLYERS / AFICHES (Detección de texto masivo o placas gráficas)
+            # ==================================================================
+            # Detección de densidad morfológica de texto y caracteres
+            grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+            _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+            kernel_text = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 3))
+            text_blobs = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_text)
+            contours, _ = cv2.findContours(text_blobs, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            text_area_sum = 0
+            candidate_signs = []
+            for c in contours:
+                area = cv2.contourArea(c)
+                if area > 0.002 * total_area:
+                    text_area_sum += area
+                    x_c, y_c, w_c, h_c = cv2.boundingRect(c)
+                    ratio = w_c / float(h_c)
+                    # Signboard / Cartel típico de fachada: ancho > alto (ratio 1.8 a 8.5)
+                    if 1.8 <= ratio <= 8.5 and (0.008 * total_area < area < 0.22 * total_area):
+                        candidate_signs.append((area, x_c, y_c, w_c, h_c))
+
+            text_coverage = text_area_sum / total_area
+            aspect_ratio = w / float(h)
+            url_lower = image_url.lower()
+
+            is_banner_keyword = any(k in url_lower for k in [
+                'banner', 'flyer', 'afiche', 'cartel', 'promo', 'sorteo', 'programa',
+                'taller', 'inscripcion', 'necrolo', 'farmacia', 'cuadro', 'comunicado', 'aviso'
+            ])
+
+            # Si la densidad de texto es superior al 7% o es afiche con texto
+            if is_banner_keyword or text_coverage > 0.07 or (aspect_ratio < 1.15 and text_coverage > 0.035):
+                self.logger.info(f"Centro de atención: BANNER/AFICHE detectado (cobertura texto: {text_coverage:.1%}). Zoom limitado al 100%.")
+                return 50.0, 50.0, True, f"banner_flyer_100pct_{text_coverage:.2f}"
+
+            # ==================================================================
+            # 3. EDIFICIOS / FACHADAS (Búsqueda de cartel, letrero o leyenda)
+            # ==================================================================
+            if candidate_signs:
+                # Seleccionar el cartel más prominente y centrado en la fachada
+                candidate_signs.sort(key=lambda s: s[0], reverse=True)
+                _, sx, sy, sw, sh = candidate_signs[0]
+                sign_x = (sx + sw / 2.0) / w * 100.0
+                sign_y = (sy + sh / 2.0) / h * 100.0
+                # Clampeo para mantener encuadre armónico de la fachada
+                sign_x = max(25.0, min(sign_x, 75.0))
+                sign_y = max(25.0, min(sign_y, 65.0))
+                self.logger.info(f"Centro de atención: cartel/leyenda en fachada en ({sign_x:.1f}%, {sign_y:.1f}%)")
+                return round(float(sign_x), 1), round(float(sign_y), 1), False, "edificio_cartel_leyenda"
+
+            # ==================================================================
+            # 4. FACHADA SIN CARTEL o PAISAJE / GENERAL: Equilibrio visual armónico
+            # ==================================================================
+            # Saliencia suave si hay un objeto claramente dominante
             blurred = cv2.bilateralFilter(gray, 9, 75, 75)
             edges = cv2.Canny(blurred, 45, 140)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-            dilated = cv2.dilate(edges, kernel, iterations=2)
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            dilated = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=2)
+            salient_contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            if contours:
-                min_area = 0.025 * w * h
-                valid = [c for c in contours if cv2.contourArea(c) > min_area]
+            if salient_contours:
+                valid = [c for c in salient_contours if cv2.contourArea(c) > 0.04 * total_area]
                 if valid:
                     largest = max(valid, key=cv2.contourArea)
                     M = cv2.moments(largest)
                     if M["m00"] != 0:
                         obj_x = (M["m10"] / M["m00"]) / w * 100.0
                         obj_y = (M["m01"] / M["m00"]) / h * 100.0
-                        self.logger.info(f"Centro de atención: objeto/animal saliente en ({obj_x:.1f}%, {obj_y:.1f}%)")
-                        return round(float(obj_x), 1), round(float(obj_y), 1), "objeto_animal_saliencia"
+                        obj_x = max(25.0, min(obj_x, 75.0))
+                        obj_y = max(35.0, min(obj_y, 55.0))
+                        self.logger.info(f"Centro de atención: objeto saliente en ({obj_x:.1f}%, {obj_y:.1f}%)")
+                        return round(float(obj_x), 1), round(float(obj_y), 1), False, "fachada_objeto_saliencia"
 
         except Exception as e:
             self.logger.warning(f"Excepción detectando centro de atención: {e}")
 
-        return 50.0, 45.0, "centro_editorial"
+        return 50.0, 48.0, False, "fachada_equilibrio_visual"
 
     def enhance_image_ai(self, image_bytes: bytes) -> bytes:
         """
@@ -410,14 +506,14 @@ class SlideGeneratorAgent:
                     if resp and resp.status_code == 200:
                         raw_bytes = resp.content
 
-                        # 1. Determinar centro de atención con visión artificial
-                        focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
+                        # 1. Determinar centro de atención, encuadre y tipo con IA / visión por computadora
+                        focal_x, focal_y, is_banner, method = self.detect_attention_center(raw_bytes, downloaded_url)
 
                         # 2. Mejorar brillo, contraste e intensidad en resolución Full HD
                         enhanced_bytes = self.enhance_image_ai(raw_bytes)
 
                         # 3. Subir imagen Full HD optimizada a Supabase Storage
-                        img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
+                        img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}_{is_banner}".encode()).hexdigest()[:8]
                         filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
                         uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
                         final_url = uploaded_url or downloaded_url
@@ -426,6 +522,7 @@ class SlideGeneratorAgent:
                             "url": final_url,
                             "focal_x": focal_x,
                             "focal_y": focal_y,
+                            "is_banner": is_banner,
                             "method": method
                         })
                         continue
@@ -435,14 +532,16 @@ class SlideGeneratorAgent:
 
             # Fallback seguro con desescalado a Full HD
             fallback_url = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', image_url, flags=re.I)
+            is_fallback_banner = any(k in image_url.lower() for k in ['banner', 'flyer', 'afiche', 'sorteo', 'promo'])
             processed_images.append({
                 "url": fallback_url,
                 "focal_x": 50.0,
-                "focal_y": 45.0,
+                "focal_y": 48.0,
+                "is_banner": is_fallback_banner,
                 "method": "fallback"
             })
 
-        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
+        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default"}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
                           audio_url: str, images: List[str], audio_duration: Optional[float] = None) -> str:
@@ -541,6 +640,27 @@ class SlideGeneratorAgent:
             animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
+        /* 
+           BANNERS / AFICHES:
+           El banner debe mantener el 100% de su contenido visible sin recortes de texto.
+           object-fit: contain asegura que quepa íntegro.
+           La animación Ken Burns hace un zoom in suave que se detiene exactamente al 100% de pantalla (scale 1.0).
+        */
+        .photo-slide.is-banner .photo-main {
+            object-fit: contain !important;
+            transform-origin: 50% 50% !important;
+            animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-out forwards !important;
+        }
+
+        @keyframes kenBurnsBanner {
+            0% {
+                transform: scale(0.95);
+            }
+            100% {
+                transform: scale(1.0);
+            }
+        }
+
         /*
            Animación Ken Burns para múltiples fotos (galería):
            Cada foto en pantalla realiza un acercamiento +50% más profundo (scale 1.27)
@@ -589,7 +709,7 @@ class SlideGeneratorAgent:
 <body>
     <div class="fullscreen-container" id="slideshowContainer">
         {% for img in images %}
-        <div class="photo-slide {% if loop.first %}active{% endif %}">
+        <div class="photo-slide {% if loop.first %}active{% endif %} {% if img.is_banner %}is-banner{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
             <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
