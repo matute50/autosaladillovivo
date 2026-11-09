@@ -28,30 +28,19 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   if (!newsItem) return null;
 
   const rawTitle = newsItem.title || newsItem.titulo;
-    // Preferir titulo_gancho_imagen si está disponible (máx 8 palabras ya clampado en BD)
+    // Limpieza común (pipes/barras/espacios dobles) sin recorte de palabras
+    const cleanFull = (t: string | null | undefined) =>
+      (t || '').replace(/[\\|]/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase();
+
     const ganchoImagen = newsItem.titulo_gancho_imagen;
-    const title = ganchoImagen
-      ? ganchoImagen
-          .replace(/[\\|]/g, '')
-          .replace(/\\s{2,}/g, ' ')
-          .trim()
-          .split(' ')
-          .slice(0, 8)
-          .join(' ')
-          .toUpperCase()
-      : (() => {
-          const r = newsItem.title || newsItem.titulo;
-          return r
-            ? r
-                .replace(/\\|/g, '')
-                .replace(/\\s{2,}/g, ' ')
-                .trim()
-                .split(' ')
-                .slice(0, 8)
-                .join(' ')
-                .toUpperCase()
-        : '';
-    })();
+    // Noticia destacada: título COMPLETO sobre la imagen; el límite visual real
+    // lo da line-clamp-3 (hasta 3 líneas). No recortar a 8 palabras: corta frases al medio.
+    // Tarjetas estándar: mantener gancho corto de 8 palabras (poco espacio disponible).
+    const title = isFeatured
+      ? (cleanFull(rawTitle) || cleanFull(ganchoImagen))
+      : (ganchoImagen
+          ? cleanFull(ganchoImagen).split(' ').slice(0, 8).join(' ')
+          : cleanFull(rawTitle).split(' ').slice(0, 8).join(' '));
 
   const finalImageUrl = getHighResolutionImageUrl(newsItem.image_url || newsItem.imageUrl);
   
