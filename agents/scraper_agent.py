@@ -129,14 +129,27 @@ NON_LOCAL_DISQUALIFIERS = [
     'netanyahu', 'israel', 'gaza', 'hamas', 'hamás', 'hezbollah', 'iran', 'irán', 'libano', 'líbano',
     'maduro', 'venezuela', 'caracas', 'china', 'xi jinping', 'taiwan', 'taiwán',
     'espana', 'españa', 'madrid', 'francia', 'macron', 'paris', 'parís', 'alemania', 'reino unido', 'londres',
-    'union europea', 'unión europea', 'otan', 'onu', 'fmi',
+    'union europea', 'unión europea', 'otan', 'onu', 'fmi', 'mexico', 'méxico', 'colombia', 'chile',
+    'peru', 'perú', 'uruguay', 'paraguay', 'bolivia', 'cuba', 'iran', 'japon', 'japón', 'corea',
+    # Deportes internacionales:
+    'balon de oro', 'balón de oro', 'harry kane', 'messi', 'cristiano ronaldo', 'champions league',
+    'premier league', 'f1', 'formula 1', 'kimi antonelli', 'nba', 'serie a',
     # Fútbol de primera división / nacional sin conexión local:
     'river plate', 'river define', 'boca juniors', 'superclasico', 'superclásico', 'demichelis', 'gallardo',
-    'scaloni', 'seleccion argentina', 'selección argentina', 'champions league', 'copa libertadores',
+    'scaloni', 'seleccion argentina', 'selección argentina', 'copa libertadores', 'primera division',
+    'primera división', 'liga profesional', 'afa',
     # Farándula nacional:
     'gran hermano', 'wanda nara', 'l-gante', 'marcelo tinelli', 'susana gimenez', 'susana giménez',
+    'lali esposito', 'lali espósito', 'pedro rosemblat', 'casamiento', 'famoso', 'famosos', 'premios',
+    'martin fierro', 'marti nfierro', 'farandula', 'farándula',
     # Reseñas comerciales automotrices / reviews de mercado nacional:
-    'jeep avenger', 'suv mas accesible', 'suv más accesible', 'test drive'
+    'jeep avenger', 'suv mas accesible', 'suv más accesible', 'test drive', 'lanzamiento comercial',
+    # Whatsapp y aplicaciones tecnológicas nacionales:
+    'whatsapp', 'instagram', 'facebook', 'tiktok', 'aplicacion', 'aplicación',
+    # Temas nacionales macroeconómicos:
+    'inflacion', 'inflación', 'indec', 'dolar', 'dólar', 'gobierno nacional', 'casa rosada',
+    'senado de la nacion', 'congreso nacional', 'deuda externa', 'presupuesto nacional',
+    'reforma jubilatoria', 'reforma laboral', 'reforma fiscal'
 ]
 
 
@@ -150,6 +163,39 @@ def normalize_text_for_comparison(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
+# Medios de origen: sus menciones NUNCA deben propagarse al pipeline
+# (skill saladillo-news-editorial-filter, sección 7.3)
+_MEDIA_MENTION_RE = re.compile(
+    r'\s*[-–—|:–]*\s*(?:https?://)?(?:www\.)?(?:'
+    r'abcsaladillo\.com\.ar'
+    r'|ahorasaladillo[-\s]*(?:diario[-\s]*)?digital(?:\.com\.ar)?'
+    r'|infosaladillo\.com\.ar'
+    r'|ABC\s*Saladillo(?:\.com\.ar)?'
+    r'|Ahora Saladillo Diario Digital(?:\.com\.ar)?'
+    r'|Info\s?Saladillo'
+    r')',
+    re.IGNORECASE
+)
+# "Ahora Saladillo" con A mayúscula es el medio; "ahora Saladillo" en una frase
+# ("...y ahora Saladillo suma obras") es referencia temporal y NO se toca.
+_MEDIA_MENTION_BARE_RE = re.compile(r'\s*[-–—|:–]*\s*Ahora Saladillo(?!\s+Diario)')
+
+
+def strip_media_mentions(text):
+    """Elimina menciones a los medios de origen de títulos y cuerpos de noticia."""
+    if not text:
+        return ""
+    clean = _MEDIA_MENTION_RE.sub(' ', str(text))
+    clean = _MEDIA_MENTION_BARE_RE.sub(' ', clean)
+    clean = re.sub(r'\(\s*\)', ' ', clean)
+    clean = re.sub(r'\[\s*\]', ' ', clean)
+    clean = re.sub(r'\s{2,}', ' ', clean)
+    clean = re.sub(r'[\s]*[-–—|:]+(?=[\.\,\!\?])', ' ', clean)
+    clean = re.sub(r'\s*\.{2,}\s*$', '', clean)
+    clean = re.sub(r'\s+([,.;:!?])', r'\1', clean)
+    return clean.strip(' -–—|:.').strip()
+
+
 def extract_distinctive_keywords(text):
     """Extrae palabras clave sustantivas del hecho eliminando stopwords y vocabulario genérico de noticias."""
     norm = normalize_text_for_comparison(text)
@@ -157,31 +203,132 @@ def extract_distinctive_keywords(text):
     return set(words)
 
 
+def score_image_quality(image_url: str) -> int:
+    """
+    Calcula un puntaje de calidad para una URL de imagen (0-100).
+    Mayor puntaje = mejor calidad esperada.
+
+    Criterios:
+    - Thumbnails/logos pequeños: penalización fuerte
+    - URLs con parámetros de tamaño (w=, h=, wXXxYY): deduce resolución
+    - Dominios de medios grandes: ligera bonificación
+    - Extensiones y paths que indican original vs thumbnail
+    """
+    if not image_url:
+        return 0
+
+    url_lower = image_url.lower()
+    score = 50  # Puntaje base
+
+    # Penalizaciones por thumbnails y logos
+    thumb_indicators = [
+        '-80x80', '-150x150', '-300x250', '-392x250', '-200x200',
+        'thumbnail', 'thumb', 'small', 'mini', 'sml', 'tiny',
+        'logo', 'favicon', 'badge', 'icon', 'avatar',
+        'placeholder', 'noimage', 'default-'
+    ]
+    for indicator in thumb_indicators:
+        if indicator in url_lower:
+            score -= 30
+            break
+
+    # Penalización por dimensiones en URL (suele ser imagen pequeña/redimensionada)
+    dim_match = re.search(r'(?:w|width)?(\d{2,3})x(\d{2,3})', url_lower)
+    if dim_match:
+        w, h = int(dim_match.group(1)), int(dim_match.group(2))
+        if w < 400 or h < 300:
+            score -= 25
+        elif w < 800 or h < 600:
+            score -= 10
+
+    # Resoluciones en nombre de archivo (ej: image-1920x1080.jpg)
+    resolution_match = re.search(r'(\d{3,4})x(\d{3,4})', url_lower)
+    if resolution_match:
+        w, h = int(resolution_match.group(1)), int(resolution_match.group(2))
+        if w >= 1920 and h >= 1080:
+            score += 25
+        elif w >= 1280 and h >= 720:
+            score += 15
+        elif w >= 800 and h >= 600:
+            score += 10
+
+    # Bonificación por extensiones de alta calidad
+    high_quality_exts = ['.webp', '.png', '.jpg', '.jpeg']
+    if any(url_lower.endswith(ext) for ext in high_quality_exts):
+        score += 5
+
+    # Bonificación por dominios de medios locales establecidos
+    local_domains = ['abcsaladillo.com.ar', 'ahorasaladillo-diariodigital.com.ar', 'infosaladillo.com.ar']
+    if any(domain in url_lower for domain in local_domains):
+        score += 5
+
+    # Penalización por shortcodes/CDN que suelen ser versiones comprimidas
+    if any(cdns in url_lower for cdns in ['i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'i3.wp.com']):
+        score -= 10
+
+    # Penalización por parámetros de compresión en URL
+    compress_params = ['?resize=', '?fit=', '?crop=', '&quality=', 'quality=']
+    for param in compress_params:
+        if param in url_lower:
+            score -= 5
+            break
+
+    return max(0, min(100, score))
+
+
+def get_article_image_score(article: dict) -> int:
+    """Calcula el score de imagen para un artículo scrapeado."""
+    img_url = article.get('image_url', '') or article.get('og_image_url', '')
+    return score_image_quality(img_url)
+
+
 def is_local_or_regional(title, text="", url="", section=None):
     """
     Determina si una noticia es local o regional de Saladillo y su zona de influencia.
     Omite cualquier noticia de orden nacional o internacional.
+    Regla estricta: Si el TÍTULO contiene términos nacionales/internacionales → descartar siempre,
+    incluso si hay menciones locales. Solo se acepta si el hecho principal es claramente local.
     """
     if section:
         s_norm = normalize_text_for_comparison(section)
         if any(bad in s_norm for bad in ['nacional', 'internacional', 'mundo', 'pais', 'espectaculo', 'farandula', 'auto']):
             return False, f"Sección nacional/internacional: {section}"
 
-    combined = f"{title} {text[:400]} {url}".lower()
+    combined = f"{title} {text[:600]} {url}".lower()
     combined_norm = normalize_text_for_comparison(combined)
 
-    has_local = any(loc in combined_norm for loc in LOCAL_REGIONAL_TERMS)
-
-    for disq in NON_LOCAL_DISQUALIFIERS:
-        if disq in combined_norm:
-            if not has_local:
-                return False, f"Descalificado por contenido nacional/internacional ({disq})"
-
     title_norm = normalize_text_for_comparison(title)
-    national_macro = ['inflacion', 'indec', 'dolar blue', 'gobierno nacional', 'casa rosada', 'senado de la nacion', 'congreso nacional']
+
+    # PASO 1: Verificar descalificadores en el TÍTULO → descartar SIEMPRE
+    # (el título es el indicador más fuerte del tema principal de la noticia)
+    title_disqs = [disq for disq in NON_LOCAL_DISQUALIFIERS if disq in title_norm]
+    if title_disqs:
+        return False, f"Título con contenido nacional/internacional ({title_disqs[0]})"
+
+    # PASO 2: Verificar macros nacionales en el título
+    national_macro = ['inflacion', 'indec', 'dolar blue', 'gobierno nacional', 'casa rosada',
+                      'senado de la nacion', 'congreso nacional', 'balon de oro', 'primera division',
+                      'superclasico', 'seleccion argentina', 'premios', 'famoso', 'famosos']
     for nm in national_macro:
-        if nm in title_norm and not has_local:
-            return False, f"Descalificado por temática macroeconómica/nacional ({nm})"
+        if nm in title_norm:
+            return False, f"Descalificado por temática macroeconómica/nacional en título ({nm})"
+
+    # PASO 3: Verificar si hay anclaje local en cualquier parte
+    has_local = any(loc in combined_norm for loc in LOCAL_REGIONAL_TERMS)
+    if not has_local:
+        return False, "Sin anclaje local/regional"
+
+    # PASO 4: Si hay descalificadores en el CUERPO (pero no en el título),
+    # verificar que la noticia trata predominantemente del hecho local
+    body_disqs = [disq for disq in NON_LOCAL_DISQUALIFIERS if disq in combined_norm]
+    if body_disqs:
+        # Contar menciones locales vs. descalificadores en todo el texto
+        local_count = sum(1 for loc in LOCAL_REGIONAL_TERMS if loc in combined_norm)
+        disq_count = len(body_disqs)
+        # Si hay más menciones de términos nacionales que locales → descartar
+        if disq_count >= local_count:
+            return False, f"Dominan términos nacionales/internacionales en cuerpo ({body_disqs[0]})"
+        # Si hay términos locales dominantes, aceptar (el hecho principal es local)
 
     return True, "Local/Regional verificado"
 
@@ -237,37 +384,76 @@ def are_articles_duplicate(art1, art2):
 def deduplicate_batch(articles):
     """
     Analiza y elimina noticias repetidas entre los tres medios.
-    Conserva únicamente una noticia por cada hecho (la de texto más completo).
+    Conserva únicamente una noticia por cada hecho, priorizando:
+    1. Texto más completo (>200 palabras más)
+    2. Mejor calidad de imagen (score_image_quality)
+    3. NUEVA REGLA: Si una noticia no tiene imagen, buscarla en otros medios.
+       - Si se encuentra con imagen, preferirla.
+       - Si solo se encuentra sin imagen, descartar la noticia.
     """
+    from collections import defaultdict
+
+    # Primer paso: agrupar artículos por título normalizado para encontrar duplicados
+    normalized_to_articles = defaultdict(list)
+    for art in articles:
+        title_norm = normalize_text_for_comparison(art.get('title', ''))
+        normalized_to_articles[title_norm].append(art)
+
     unique_articles = []
     discarded_count = 0
 
-    for cand in articles:
-        is_dup = False
-        cand_title = cand.get('title', '')
-        cand_source = cand.get('source_name', '')
+    for title_norm, group in normalized_to_articles.items():
+        if len(group) == 1:
+            # Único artículo con este título, conservarlo tal como está
+            unique_articles.append(group[0])
+            continue
 
-        for kept in unique_articles:
-            if are_articles_duplicate(cand, kept):
-                is_dup = True
-                discarded_count += 1
-                kept_title = kept.get('title', '')
-                kept_source = kept.get('source_name', '')
-                print(f"  [Deduplicación] Noticia repetida detectada: '{cand_title[:55]}...' ({cand_source}) coincide con '{kept_title[:55]}...' ({kept_source}). Se descarta repetición.")
+        # Hay múltiples artículos con títulos similares - aplicar lógica de selección
+        # Separar aquellos con imagen y sin imagen
+        with_img = []
+        without_img = []
 
-                # Si el nuevo candidato tiene más texto y mejor imagen, enriquecer el elemento conservado
-                if len(cand.get('text', '')) > len(kept.get('text', '')) + 200:
-                    kept['text'] = cand['text']
-                    kept['original_text'] = cand['text']
-                if 'default-og-image' in kept.get('image_url', '') and 'default-og-image' not in cand.get('image_url', ''):
-                    kept['image_url'] = cand['image_url']
-                break
+        for art in group:
+            img_score = get_article_image_score(art)
+            if img_score > 0:
+                with_img.append(art)
+            else:
+                without_img.append(art)
 
-        if not is_dup:
-            unique_articles.append(cand)
+        # Aplicar prioridades:
+        # 1. Si hay al menos un artículo con imagen, elegir el de mejor calidad de imagen
+        if with_img:
+            # Ordenar por score de imagen (mayor es mejor)
+            with_img.sort(key=lambda a: get_article_image_score(a), reverse=True)
+            chosen = with_img[0]
+            discarded_in_group = len(with_img) - 1 + len(without_img)
+            discarded_count += discarded_in_group
+
+            # Enriquecer el elegido con mejor texto si hay otro con mejor texto pero sin imagen
+            for art in with_img[1:] + without_img:
+                cand_text_len = len(art.get('text', ''))
+                chosen_text_len = len(chosen.get('text', ''))
+                if cand_text_len > chosen_text_len + 200:
+                    chosen['text'] = art['text']
+                    chosen['original_text'] = art['text']
+            unique_articles.append(chosen)
+            print(f"  [Deduplicación] Título duplicado: conservado artículo CON imagen ({chosen['source_name']}) y descartados {discarded_in_group} sin imagen")
+
+        # 2. Si todos los artículos sobre este tema NO tienen imagen, descartar todos
+        else:
+            # Todos los artículos sobre este tema no tienen imagen
+            # Descartarlos todos, pero enricher el último con mejor texto antes de tirar
+            if without_img:
+                # Ordenar por longitud de texto (el más completo)
+                without_img.sort(key=lambda a: len(a.get('text', '')), reverse=True)
+                # Aun así, descartarlos todos, pero imprimir mensaje
+                discarded_count += len(without_img)
+                print(f"  [Deduplicación] Título duplicado SIN imagen en ningún medio: descartados todos ({len(without_img)} artículos) - título: '{without_img[0]['title'][:50]}...'")
+            # No agregar nada a unique_articles
 
     if discarded_count > 0:
-        print(f"  [Deduplicación] {discarded_count} noticias duplicadas eliminadas entre medios.")
+        print(f"  [Deduplicación] {discarded_count} noticias eliminadas por falta de imagen o duplicados.")
+
     return unique_articles
 
 
@@ -353,7 +539,17 @@ class ArticleContentExtractor(HTMLParser):
             src = attr_dict.get('src') or attr_dict.get('data-src') or attr_dict.get('data-lazy-src')
             if src:
                 src_full = urljoin(self.base_url, src)
-                if not any(x in src_full.lower() for x in ['logo', 'icon', 'banner', 'pixel', 'advert', 'publicidad']):
+                s = src_full.lower()
+                # skip logos, icons, sidebars/widgets, thumbnails, gravatars, etc.
+                if any(x in s for x in ['logo', 'icon', 'banner', 'pixel', 'advert', 'publicidad', 'gravatar', 'avatar']):
+                    pass
+                elif __import__('re').search(r'-\d{2,3}x\d{2,3}\.(?:webp|jpg|jpeg|png)$', s):
+                    pass
+                elif __import__('re').search(r'\b(logo|header|banner|favicon|badge|widget|avatar)\.(?:png|jpg|jpeg|svg)$', s):
+                    pass
+                elif __import__('re').search(r'ahorasaladillo\.png$', s):
+                    pass
+                else:
                     self.images.append(src_full)
 
     def handle_endtag(self, tag):
@@ -471,13 +667,15 @@ class ScraperAgent:
         if not title and parser.title_candidates:
             title = parser.title_candidates[0]
 
-        # Limpiar sufijos típicos de medios
+        # Limpiar sufijos típicos de medios + cualquier otra mención al medio de origen
         title = re.sub(r'\s*[-|]\s*(ABC Saladillo|Ahora Saladillo|InfoSaladillo|Diario Digital).*$', '', title, flags=re.I).strip()
+        title = strip_media_mentions(title)
 
         if not title or len(title) < 10:
             return None
 
-        body_text = "\n\n".join(parser.paragraphs)
+        # El cuerpo tampoco debe propagar menciones a los medios de origen
+        body_text = strip_media_mentions("\n\n".join(parser.paragraphs))
         if len(body_text) < 120:
             return None
 

@@ -29,9 +29,31 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   if (!newsItem) return null;
 
   const rawTitle = newsItem.title || newsItem.titulo;
-  const title = rawTitle ? rawTitle.replace(/\|/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase() : '';
+    // Preferir titulo_gancho_imagen si está disponible (máx 8 palabras ya clampado en BD)
+    const ganchoImagen = newsItem.titulo_gancho_imagen;
+    const title = ganchoImagen
+      ? ganchoImagen
+          .replace(/[\\|]/g, '')
+          .replace(/\\s{2,}/g, ' ')
+          .trim()
+          .split(' ')
+          .slice(0, 8)
+          .join(' ')
+          .toUpperCase()
+      : (() => {
+          const r = newsItem.title || newsItem.titulo;
+          return r
+            ? r
+                .replace(/\\|/g, '')
+                .replace(/\\s{2,}/g, ' ')
+                .trim()
+                .split(' ')
+                .slice(0, 8)
+                .join(' ')
+                .toUpperCase()
+        : '';
+    })();
 
-  
   const getProcessedImageUrl = (inputUrl: string | undefined | null): string => {
       if (!inputUrl) return '/placeholder.png';
       
@@ -59,8 +81,6 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   const isHtmlSlide = hasSlide && (urlSlide.includes('.html') || urlSlide.includes('/slides/'));
   const hasAudioImage = !!finalImageUrl && !!audioUrl;
   const isPlayable = hasSlide || hasAudioImage;
-
-
 
   const scrollToPlayer = () => {
     if (typeof window !== 'undefined') {
@@ -176,20 +196,19 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
 
         {/* Indicador de Play sutil en esquina inferior derecha */}
         {isPlayable && (
-            <div className={cn(
-                "absolute bottom-2 right-2 flex items-center justify-center rounded-full p-0.5 border border-white/70 shadow-lg shadow-black/50 backdrop-blur-md bg-black/40 group-hover:!bg-[#003399] group-hover:border-white group-hover:bg-opacity-100 z-30",
-                isFeatured ? "w-11 h-11" : "w-8 h-8"
-            )}>
-                 <Play
-                    size={isFeatured ? 25 : 18}
-                    fill="white"
-                    className="text-white drop-shadow-lg"
-                    strokeWidth={1.35}
-                 />
-            </div>
+          <div className={cn(
+            "absolute bottom-2 right-2 flex items-center justify-center rounded-full p-0.5 border border-white/70 shadow-lg shadow-black/50 backdrop-blur-md bg-black/40 group-hover:!bg-[#003399] group-hover:border-white group-hover:bg-opacity-100 z-30",
+            isFeatured ? "w-11 h-11" : "w-8 h-8"
+          )}>
+             <Play
+                size={isFeatured ? 25 : 18}
+                fill="white"
+                className="text-white drop-shadow-lg"
+                strokeWidth={1.35}
+             />
+          </div>
         )}
       </div>
-
     </motion.article>
   );
 };

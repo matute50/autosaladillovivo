@@ -8,7 +8,7 @@ bajo estricto estilo periodístico rioplatense bonaerense para Saladillo Vivo.
 Características:
 - Enfoque Free-First: prioriza proveedores gratuitos (GLM → Groq → Gemini → OpenRouter → OpenAI).
 - Fallback heurístico local funcional sin APIs externas.
-- Directivas editoriales para noticiero radial (TTS) y gancho de imagen (máx 6 palabras).
+- Directivas editoriales para noticiero radial (TTS) y gancho de imagen (máx 8 palabras).
 - Compatibilidad total con JSON estricto y respuestas flexibles de LLM.
 """
 
@@ -29,6 +29,41 @@ except ImportError:
 
 logger = logging.getLogger("AiRewriterAgent")
 logger.setLevel(logging.INFO)
+
+# Medios de origen del scraping: sus menciones NUNCA deben aparecer en títulos ni textos
+# (regla editorial Saladillo Vivo — skill saladillo-news-editorial-filter, sección 7.2)
+MEDIA_MENTION_RE = re.compile(
+    r'\s*[-–—|:–]*\s*(?:https?://)?(?:www\.)?(?:'
+    r'abcsaladillo\.com\.ar'
+    r'|ahorasaladillo[-\s]*(?:diario[-\s]*)?digital(?:\.com\.ar)?'
+    r'|infosaladillo\.com\.ar'
+    r'|ABC\s*Saladillo(?:\.com\.ar)?'
+    r'|Ahora Saladillo Diario Digital(?:\.com\.ar)?'
+    r'|Info\s?Saladillo'
+    r')',
+    re.IGNORECASE
+)
+
+# "Ahora Saladillo" a secas es el nombre del medio; el "ahora Saladillo" de una frase
+# ("...y ahora Saladillo suma obras") es referencia temporal y NO debe tocarse.
+# Por eso este patrón es case-sensitive (con A mayúscula) sin IGNORECASE.
+MEDIA_MENTION_BARE_RE = re.compile(r'\s*[-–—|:–]*\s*Ahora Saladillo(?!\s+Diario)')
+
+
+def strip_media_mentions(text):
+    """Elimina toda mención a los medios de origen (ABC Saladillo / Ahora Saladillo / InfoSaladillo)."""
+    if not text:
+        return ""
+    clean = MEDIA_MENTION_RE.sub(' ', str(text))
+    clean = MEDIA_MENTION_BARE_RE.sub(' ', clean)
+    clean = re.sub(r'\(\s*\)', ' ', clean)
+    clean = re.sub(r'\[\s*\]', ' ', clean)
+    clean = re.sub(r'\s{2,}', ' ', clean)
+    # Limpiar restos de puntuación colgantes dejados al remover las menciones
+    clean = re.sub(r'[\s]*[-–—|:]+(?=[\.\,\!\?])', ' ', clean)
+    clean = re.sub(r'\s*\.{2,}\s*$', '', clean)
+    clean = re.sub(r'\s+([,.;:!?])', r'\1', clean)
+    return clean.strip(' -–—|:.').strip()
 
 
 def load_env_variables():
@@ -107,8 +142,7 @@ class AiRewriterAgent:
 
     def create_prompt(self, title, content):
         """Genera el prompt periodístico estricto para estructurar la noticia."""
-        return f"""Eres un periodista profesional y redactor jefe de "Saladillo Vivo", portal de noticias de Saladillo, Provincia de Buenos Aires.
-Reestructura el siguiente despacho manteniendo fidelidad absoluta a los hechos, nombres, fechas y citas:
+        return f"""Eres el redactor principal y locutor estrella de "Saladillo Vivo", portal de noticias y radio de Saladillo, Provincia de Buenos Aires. Tu objetivo es transformar noticias frías de agencias o scraping en relatos humanos, cercanos y con perfecto acento rioplatense bonaerense, manteniendo fidelidad absoluta a los hechos, nombres, fechas y citas.
 
 TÍTULO ORIGINAL:
 {title}
@@ -121,52 +155,62 @@ FILTRO EDITORIAL REGIONAL ESTRICTO:
 Si el despacho corresponde a una noticia de orden NACIONAL o INTERNACIONAL sin anclaje local (ejemplos: política exterior o conflictos de otros países, inflación o economía nacional macro sin impacto local, fútbol de Primera División/AFA como Boca/River sin jugador local, lanzamientos comerciales de autos, farándula/espectáculos nacionales), DEBES RECHAZARLA respondiendo exactamente:
 {{"es_local_regional": false, "motivo_rechazo": "Noticia nacional/internacional sin anclaje local"}}
 
-Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumple las siguientes:
+Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumple las siguientes 5 directivas:
 
-DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
+1. TÍTULO VISUAL / GANCHO PARA IMAGEN (titulo_gancho_imagen — MÁXIMO 8 PALABRAS, OBLIGATORIO):
+   - Objetivo: superponer sobre la foto de portada, slides y tarjetas: va centrado y debe componerse para ocupar como máximo 3 líneas de texto.
+   - Regla: ENTRE 3 Y 8 PALABRAS EXACTAMENTE. Prohibido exceder las 8.
+   - Estilo: Potente, directo y enérgico. Genera clic sin palabras vacías: el lector entiende el tema al instante.
+   - Ejemplos: "Corte de luz en Saladillo" | "Inauguran nuevo polideportivo municipal" | "Alerta por tormentas fuertes" | "Homenaje a Aída Friggieri" | "Gran festejo por el aniversario".
 
-1. TITULAR RADIAL (GANCHO DIRECTO DE HASTA 12 PALABRAS):
-   - El titular cumple función de gancho para el oyente: resume la esencia de la noticia de forma impactante y muy rápida.
-   - Longitud: Debe leerse en menos de 3 o 4 segundos (MÁXIMO 12 PALABRAS, típicamente de 5 a 10 palabras).
-   - Estructura fuerte en tiempo PRESENTE: Dale actualidad y urgencia (ej. "el intendente anuncia", "la policía detiene", "comienzan las obras"), incluso si el hecho ocurrió ayer.
-   - Cero misterio ("sin gancho ciego"): No uses frases vacías tipo "Mirá lo que pasó". El oyente necesita saber de qué se trata inmediatamente.
-   - Ejemplos:
-     * Diario: "El Gobierno nacional anunció un nuevo paquete de medidas económicas tras la reunión de gabinete de ayer."
-     * Radial correcto: "Nuevo ajuste: el Gobierno anuncia medidas económicas."
-     * Local: "Obras viales: Saladillo repavimenta los accesos principales."
+2. TÍTULO RADIAL / AUDIO (titulo_radial — MÁXIMO 12 PALABRAS):
+   - Objetivo: resumen directo para los primeros 4 segundos del audio: el oyente debe saber qué pasó apenas empieza.
+   - Regla: Una sola oración, máximo 12 palabras (ideal 5 a 10). Cero misterio ("sin gancho ciego"): prohibido "Mirá lo que pasó".
+   - Estilo: Tiempo PRESENTE con actualidad y urgencia (aunque el hecho ocurrió ayer).
+   - Ejemplos: "Nuevo ajuste: el Gobierno anuncia medidas económicas." | "Obras viales: Saladillo repavimenta los accesos principales."
 
-2. CUERPO DE LA NOTICIA RADIAL (35 A 45 SEGUNDOS DE LOCUCIÓN):
-   - EXTENSIÓN EXACTA: Redacta un despacho condensado de estrictamente entre 80 y 110 palabras. A la velocidad normal de Google TTS (140 palabras/minuto), garantiza exactamente entre 35 y 45 segundos de audio completo.
-   - BREVEDAD Y CONCISIÓN: Oraciones cortas. Una sola idea por oración. Evita subordinadas largas que dejen sin aire al oyente.
-   - ESTILO DIRECTO Y COLOQUIAL: Escribe como se habla en la radio bonaerense/rioplatense, cercano y natural, pero con rigor periodístico.
-   - VOZ ACTIVA OBLIGATORIA: Siempre voz activa ("El municipio licitó la obra...", nunca "La obra fue licitada por el municipio..."). Aporta dinamismo y contundencia.
-   - SIN CIFRAS COMPLEJAS: Redondea números para el oído (en vez de "1.428.390 pesos", decir "casi un millón y medio de pesos"; en vez de "3.284 metros", decir "más de tres kilómetros").
-   - PUNTUACIÓN RADIAL: Usa únicamente puntos y comas. Prohibido usar punto y coma (;), paréntesis () o guiones largos. Si necesitas acotar algo, hazlo en una oración corta independiente.
+3. CUERPO NARRATIVO Y HUMANIZACIÓN (contenido_optimizado — LOCUCIÓN TOTAL MÁXIMO 45 SEGUNDOS):
+   - Extensión: estrictamente entre 80 y 110 palabras (el motor locuta a 160-180 palabras por minuto: título + cuerpo + promo quedan por debajo de los 45 segundos).
+   - ESTRUCTURA DE STORYTELLING (OBLIGATORIA, renuncá a la pirámide invertida):
+     * Arranque: entrá con el dato más fuerte, una imagen visual o el impacto directo al vecino. No amontones todos los datos de golpe.
+     * Desarrollo: contá el por qué o el cómo afecta esto a la comunidad, con intensidad constante.
+     * Cierre: terminá con una frase conclusiva ("Ahora, restará esperar...", "El próximo paso será...", "De esta manera..."). PROHIBIDO terminar con un dato suelto.
+   - SINTAXIS HABLADA: Oraciones cortas de 15 a 20 palabras. Sujeto + Verbo (voz activa obligatoria) + Complemento. Una idea por oración. Prohibidos los incisos largos, los paréntesis, las comillas y el punto y coma.
+   - ADAPTACIÓN AUDITIVA DE CIFRAS: Redondeá los números extensos para el oído ("casi medio millón" en vez de "478.610"; "casi un millón y medio de pesos" en vez de "1.428.390 pesos"). Traducí medidas a referencias locales asimilables al escuchar ("una superficie como la plaza principal", "como cuatro canchas de fútbol").
    - CERO REPETICIÓN: Cada frase debe sumar un dato nuevo. No repitas palabras ni ideas entre el inicio y el cierre.
-   - FONÉTICA Y ACENTUACIÓN RIOPLATENSE: Cuida la correcta acentuación en verbos y términos locales (llegó, anunció, inauguró, continuará).
+   - ESTILO: Como se habla en la radio bonaerense/rioplatense: cercano, natural, empático y con rigor periodístico. Cuidá la correcta acentuación (llegó, anunció, inauguró, continuará).
 
-3. TÍTULO GANCHO PARA IMAGEN (MÁXIMO 8 PALABRAS - OBLIGATORIO):
-   - Este título se superpone sobre la foto en portada, slides y tarjetas de noticia.
-   - DEBE TENER ENTRE 3 Y 8 PALABRAS EXACTAMENTE (prohibido exceder las 8).
-   - Potente, directo y enérgico: provoca intriga e impacto inmediato en quien ve la imagen.
-   - Sin palabras vacías ni misterio: el lector entiende el tema al instante.
-   - Ejemplos:
-     * "Corte de luz en Saladillo"
-     * "Inauguran nuevo polideportivo municipal"
-     * "Alerta por tormentas fuertes"
-     * "Homenaje a Aída Friggieri"
-     * "Gran festejo por el aniversario"
+4. ADAPTACIÓN FONÉTICA RIOPLATENSE (APLICACIÓN DE SOUL.md):
+   - El texto será locutado por motores TTS (Gemini, Rime Coda o Edge). Para que suene a locutor local del interior bonaerense, aplicá las reglas de pronunciación y modismos de SOUL.md sobre texto ortográficamente correcto (el motor ya aplica el sheísmo y la aspiración de la s).
+   - PUNTUACIÓN ESTRATÉGICA (RESPIRACIÓN): los motores TTS modernos se guían por la puntuación para la emotividad:
+     * Comas , para pausas breves y naturales.
+     * Puntos seguidos . para bajar el tono y separar ideas.
+     * Puntos suspensivos ... para generar expectativa o transición suave (por ejemplo entre el título y el desarrollo).
+   - NÚMEROS EN LETRAS: Escribí los números enteros en letras ("mil novecientos noventa" en lugar de "1990") para evitar lecturas erróneas del TTS.
 
-4. META DESCRIPCIÓN Y ETIQUETAS:
+5. ANÁLISIS DE TONO (campo tono) — asigná UNA etiqueta según el carácter de la noticia:
+   - "SOLEMNE": necrológicas, accidentes, tragedias (ritmo pausado, tono grave).
+   - "NEUTRAL": política, economía, anuncios (ritmo ágil, informativo).
+   - "ALEGRE": deportes, festejos, cultura (ritmo dinámico, entusiasta).
+
+6. PROHIBICIÓN ABSOLUTA DE MENCIONAR MEDIOS DE ORIGEN (aplica a titulo_radial, titulo_gancho_imagen y contenido_optimizado):
+   - NUNCA mencionar ni atribuir a: "ABC Saladillo", "abcsaladillo.com.ar", "Ahora Saladillo", "Ahora Saladillo Diario Digital", "ahorasaladillo-diariodigital.com.ar", "InfoSaladillo", "infosaladillo.com.ar".
+   - Tampoco fórmulas de atribución: "según informó...", "publicado en...", "fuente:...", "como publicó...".
+   - Si el texto original trae sufijos o menciones al medio (ej. "... – Ahora Saladillo Diario Digital"), eliminarlas por completo.
+   - La noticia debe leerse como producción propia e independiente de Saladillo Vivo.
+
+7. META DESCRIPCIÓN Y ETIQUETAS (exclusivas de SEO):
    - Meta descripción SEO concisa de máximo 155 caracteres.
    - 4 a 6 palabras clave locales ("Saladillo", etc.).
+   - IMPORTANTE: la meta descripción es un campo EXCLUSIVO de SEO (resultado de Google y previews). NUNCA se locuta ni se agrega al cuerpo radial.
 
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
   "es_local_regional": true,
+  "tono": "NEUTRAL",
   "titulo_radial": "Titular radial corto y directo en presente (máximo 12 palabras)",
-  "titulo_gancho_imagen": "Gancho imagen máx 6 palabras",
-  "contenido_optimizado": "Texto radial breve de 80 a 110 palabras en voz activa...",
+  "titulo_gancho_imagen": "Gancho imagen de 3 a 8 palabras",
+  "contenido_optimizado": "Texto radial de 80 a 110 palabras: arranque de impacto, desarrollo de impacto comunitario y frase conclusiva de cierre; números en letras; puntuación estratégica...",
   "meta_description": "Resumen conciso para SEO...",
   "palabras_clave": ["Saladillo", "tema1", "tema2"]
 }}"""
@@ -332,8 +376,8 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                 keywords.append(w)
 
         return {
-            'titulo_optimizado': hook_title,
-            'contenido_optimizado': condensed_body.strip(),
+            'titulo_optimizado': strip_media_mentions(hook_title),
+            'contenido_optimizado': strip_media_mentions(condensed_body).strip(),
             'meta_description': meta_desc,
             'palabras_clave': keywords
         }
@@ -411,6 +455,9 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                             if alt in ai_result and ai_result[alt]:
                                 ai_result['titulo_radial'] = str(ai_result[alt]).strip()
                                 break
+                    # Clamp duro: máximo 12 palabras (regla editorial)
+                    if ai_result.get('titulo_radial'):
+                        ai_result['titulo_radial'] = self._clamp_title_to_max_words(ai_result['titulo_radial'], max_words=12)
                     if 'titulo_gancho_imagen' not in ai_result:
                         for alt in ['titulo_gancho_imagen', 'titulo_gancho', 'gancho_imagen', 'image_hook', 'gancho']:
                             if alt in ai_result and ai_result[alt]:
@@ -447,10 +494,20 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             ai_result = self.local_heuristic_fallback(title, content)
             used_provider = 'Fallback Heurístico Local'
 
-        # Construir titulo_gancho_imagen si no vino (clamp a 6 palabras del radial o título original)
+        # Construir titulo_gancho_imagen si no vino (clamp a 8 palabras del radial o título original)
         if 'titulo_gancho_imagen' not in ai_result or not ai_result.get('titulo_gancho_imagen'):
             source_for_hook = ai_result.get('titulo_radial') or ai_result.get('titulo_optimizado') or title
-            ai_result['titulo_gancho_imagen'] = self._clamp_title_to_max_words(source_for_hook, max_words=6)
+            ai_result['titulo_gancho_imagen'] = self._clamp_title_to_max_words(source_for_hook, max_words=8)
+
+        # Clamp duro final del título radial a 12 palabras
+        if ai_result.get('titulo_radial'):
+            ai_result['titulo_radial'] = self._clamp_title_to_max_words(ai_result['titulo_radial'], max_words=12)
+
+        # Barrera dura: eliminar cualquier mención a medios de origen que la IA haya dejado
+        # (regla 5 del prompt + skill saladillo-news-editorial-filter sección 7.2)
+        for _field in ('titulo_radial', 'titulo_gancho_imagen', 'contenido_optimizado'):
+            if ai_result.get(_field):
+                ai_result[_field] = strip_media_mentions(ai_result[_field])
 
         # Limitar meta_description estrictamente a <= 155 caracteres para SEO
         raw_meta = ai_result.get('meta_description') or title[:150]
@@ -464,10 +521,16 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             image_url
         )
 
+        # Etiqueta de tono multi-motor (SOLEMNE / NEUTRAL / ALEGRE), normalizada
+        _tono_raw = str(ai_result.get('tono', 'NEUTRAL')).strip().upper().strip('[] ')
+        if _tono_raw not in ('SOLEMNE', 'NEUTRAL', 'ALEGRE'):
+            _tono_raw = 'NEUTRAL'
+
         return {
             'titulo_ia': ai_result.get('titulo_radial', title),          # Título radial (hasta 12 palabras)
             'titulo_gancho_imagen': ai_result.get('titulo_gancho_imagen', ''),  # Gancho imagen (máx 6 palabras)
             'contenido_ia': ai_result.get('contenido_optimizado', content),
+            'tono': _tono_raw,
             'meta_description': meta_desc,
             'meta_keywords': ai_result.get('palabras_clave', ['Saladillo']),
             'featureStatus': feature_status,

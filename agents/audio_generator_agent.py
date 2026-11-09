@@ -20,6 +20,7 @@ import io
 import re
 import time
 import random
+import itertools
 import hashlib
 import logging
 import asyncio
@@ -62,6 +63,13 @@ except ImportError:
 
 from .storage_agent import StorageAgent, load_env_credentials
 from .ai_rewriter_agent import load_env_variables
+from utils.gemini_tts_rotator import gemini_rotator, GEMINI_VOICE
+from utils.ssml_builder import build_ssml
+try:
+    from utils.tts_phonetic_adapter import adapt_text_for_tts
+except ImportError:
+    def adapt_text_for_tts(text: str, final_pause: bool = True) -> str:
+        return text
 
 logger = logging.getLogger("AudioGeneratorAgent")
 logger.setLevel(logging.INFO)
@@ -142,7 +150,7 @@ def apply_rioplatense_phonetics(text: str) -> str:
     return text
 
 
-def build_gemini_tts_prompt(text: str) -> str:
+def build_ssml(text: str) -> str:
     """Construye el prompt completo para Gemini TTS con tag de estilo y reescritura fonética."""
     phonetic_text = apply_rioplatense_phonetics(text)
     return f"{GEMINI_TTS_STYLE_TAG} {phonetic_text}"
@@ -165,6 +173,10 @@ class AudioGeneratorAgent:
         self.tts_voice_id = self.env.get('TTS_VOICE_ID')
         self.tts_api_url = self.env.get('TTS_API_URL', 'https://api.elevenlabs.io/v1/text-to-speech')
 
+        # Directiva editorial definitiva: alternar por noticia entre las dos voces
+        # argentinas de Edge/Azure TTS (es-AR-TomasNeural / es-AR-ElenaNeural).
+        self._voice_cycle = itertools.cycle(["es-AR-TomasNeural", "es-AR-ElenaNeural"])
+
         # Resolver API key de Gemini
         self.gemini_api_key = (
             self.env.get('GEMINI_API_KEY') or
@@ -172,6 +184,16 @@ class AudioGeneratorAgent:
             os.environ.get('GEMINI_API_KEY') or
             os.environ.get('GOOGLE_API_KEY')
         )
+
+        # Config Rime TTS — voces argentinas Coda (prioridad 2 del pipeline)
+        self.rime_api_key = (
+            self.env.get('RIME_API_KEY') or
+            os.environ.get('RIME_API_KEY', '').strip()
+        )
+        self.rime_default_voice = self.env.get('RIME_VOICE') or 'cielo'
+        self.rime_model_id = self.env.get('RIME_MODEL_ID') or 'coda'
+        # Ciclo round-robin de las 3 voces argentinas de Coda: cielo / abril / solsticio
+        self._rime_voice_cycle = itertools.cycle(['cielo', 'abril', 'solsticio'])
 
         self._ensure_storage_bucket()
 
@@ -218,8 +240,12 @@ class AudioGeneratorAgent:
         clean = re.sub(r'[\r\n]+', '. ', clean)
         clean = re.sub(r'\s+', ' ', clean)
         # Remover caracteres no legibles (permitir acentos y ñ)
-        clean = re.sub(r'[^\w\s\.,;:¡!¿?\-\'\"áéíóúÁÉÍÓÚñÑ]', '', clean)
+        clean = re.sub(r'[^\w\s\.,;:¡!¿?\-\'"áéíóúÁÉÍÓÚñÑ]', '', clean)
         return clean.strip()
+
+    def next_voice(self) -> str:
+        """Devuelve la siguiente voz alternada (Tomas/Elena) para la locución."""
+        return next(self._voice_cycle)
 
     def get_random_closing_phrase(self) -> str:
         """Selecciona al azar una frase de cierre institucional para la noticia."""
@@ -244,7 +270,7 @@ class AudioGeneratorAgent:
 
         try:
             client = genai.Client(api_key=self.gemini_api_key)
-            prompt = build_gemini_tts_prompt(text)
+            prompt = build_ssml(text)
 
             logger.info(f"Gemini TTS: generando audio con voz '{self.voice}' (reescritura fonética aplicada)")
 
@@ -337,25 +363,105 @@ class AudioGeneratorAgent:
             logger.warning(f"ffmpeg no disponible o error: {e}")
             return wav_bytes
 
-    def text_to_speech(self, text: str, language: str = 'es', institutional_tone: bool = False) -> Optional[bytes]:
+    def _rime_next_voice(self) -> str:
+        """Rotación round-robin de voces argentinas Coda."""
+        return next(self._rime_voice_cycle)
+
+    def text_to_speech_rime(self, text: str, voice: Optional[str] = None) -> Optional[bytes]:
+        """
+        TTS vía Rime Coda REST API — prioridad 2 del pipeline.
+        Usa voces argentinas específicas (cielo / abril / solsticio).
+        Retorna MP3 bytes o None en caso de fallo.
+        """
+        if not self.rime_api_key or not HAS_REQUESTS:
+            logger.warning("⚠️ RIME_API_KEY no configurada; omitiendo Rime TTS")
+            return None
+
+        rime_voice = voice or self.rime_default_voice
+
+        payload = {
+            "text": text,
+            "speaker": rime_voice,
+            "modelId": self.rime_model_id,
+            "lang": "es"
+        }
+        headers = {
+            "Authorization": f"Bearer {self.rime_api_key}",
+            "Accept": "audio/wav",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            resp = requests.post(
+                "https://coda.api.rime.ai/",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            if resp.status_code == 200 and len(resp.content) > 1000:
+                # Coda retorna WAV → convertir a MP3 para consistencia con el pipeline
+                mp3_bytes = self._wav_to_mp3(resp.content, bitrate="128k")
+                logger.info(
+                    f"✅ Rime Coda TTS: {len(mp3_bytes)} bytes | VOZ: {rime_voice} | modelo: {self.rime_model_id}"
+                )
+                return mp3_bytes
+            else:
+                logger.warning(
+                    f"⚠️ Rime TTS falló ({resp.status_code}): {resp.text[:200]}"
+                )
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️ Rime TTS excepción: {type(e).__name__}: {e}")
+            return None
+
+    def text_to_speech(self, text: str, language: str = 'es', institutional_tone: bool = False, voice: Optional[str] = None,
+                       prefer_engine: Optional[str] = None) -> Optional[bytes]:
         """
         Convierte texto a audio con máxima fidelidad rioplatense.
-        Prioridad:
-        1. Gemini TTS con reescritura fonética rioplatense (SOUL.md) — motor principal.
-        2. Edge TTS con voz rioplatense (es-AR-TomasNeural) — respaldo nativo.
-        3. Google TTS (gTTS) con tld='com.ar' — respaldo genérico.
-        """
-        # 1. Prioridad Principal: Gemini TTS con reescritura fonética rioplatense
-        gemini_audio = self.text_to_speech_gemini(text)
-        if gemini_audio:
-            return gemini_audio
+        Orden de prioridad:
+        1. Gemini TTP (multi-key rotativo, SSML + SOUL.md) — motor principal.
+        2. Rime Coda TTS (voces argentinas: cielo / abril / solsticio, $50/mes free tier).
+        3. Edge TTP (voces neurales argentinas de Microsoft Azure, alternando
+           es-AR-TomasNeural / es-AR-ElenaNeural por noticia) — respaldo.
+        4. Google TTS (gTTS) con tld='com.ar' — respaldo genérico.
 
-        # 2. Respaldo: Edge TTS con voz rioplatense (es-AR-TomasNeural)
+        prefer_engine: si se pasa ('gemini'|'rime'|'edge'|'gtts'), ese motor se intenta
+        PRIMERO. Se usa para que la frase institucional de cierre suene con la MISMA
+        voz/motor que el cuerpo de la noticia cuando hay que sintetizarlos por separado.
+        """
+        # ─── 1° PRIORIDAD: Gemini TTS (rotador multi-key REST) + SOUL.md ───
+        # Orden pedido por el usuario: mientras las cuentas de Google funcionen,
+        # se usa Gemini; Rime Coda (voces AR) y Edge TTS quedan como respaldo.
+        if prefer_engine in (None, 'gemini'):
+            try:
+                prompt = build_ssml(text)
+                audio_bytes = gemini_rotator.synthesize(prompt)
+                if audio_bytes and len(audio_bytes) > 1000:
+                    self._last_engine = 'gemini'
+                    logger.info(f"✅ Gemini TTS (principal): {len(audio_bytes)} bytes | VOZ: {GEMINI_VOICE} | SOUL.md aplicado")
+                    return audio_bytes
+                logger.warning("⚠️ Gemini TTS sin audio, intentando fallback Rime Coda...")
+            except Exception as e:
+                logger.warning(f"⚠️ Gemini TTS falló ({type(e).__name__}: {e}), probando fallback Rime Coda...")
+
+        # ─── 2° PRIORIDAD: Rime Coda TTS (voces argentinas, $50/mes free tier) ───
+        if prefer_engine in (None, 'rime', 'gemini'):
+            rime_bytes = self.text_to_speech_rime(text, voice=voice)
+            if rime_bytes and len(rime_bytes) > 1000:
+                self._last_engine = 'rime'
+                return rime_bytes
+            if rime_bytes is not None:
+                logger.warning("⚠️ Rime Coda TTS generó audio muy pequeño, intentando fallback Edge TTS...")
+
+        # ─── 3° PRIORIDAD: Edge TTS (Azure neural, voces AR alternadas) ───
         if HAS_EDGE_TTS:
             try:
+                tts_voice = voice or self.next_voice()
                 async def _synthesize():
+                    # Parámetros de máxima expresividad soportados por el motor:
+                    # rate: tempo de noticiero ágil; pitch: realce tonal (+2Hz).
                     rate_param = "-4%" if institutional_tone else "+0%"
-                    comm = edge_tts.Communicate(text, "es-AR-TomasNeural", rate=rate_param)
+                    comm = edge_tts.Communicate(text, tts_voice, rate=rate_param, volume="+0%", pitch="+2Hz")
                     audio_data = bytearray()
                     async for chunk in comm.stream():
                         if chunk.get("type") == "audio":
@@ -367,19 +473,21 @@ class AudioGeneratorAgent:
                     if loop.is_running():
                         import concurrent.futures
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
+                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=60)
                     else:
                         audio_bytes = loop.run_until_complete(_synthesize())
                 except RuntimeError:
                     audio_bytes = asyncio.run(_synthesize())
 
                 if audio_bytes and len(audio_bytes) > 1000:
-                    logger.info(f"Audio sintetizado con éxito con Edge TTS (es-AR-TomasNeural - Respaldo): {len(audio_bytes)} bytes")
+                    self._last_engine = 'edge'
+                    logger.info(f"✅ Edge TTS (principal): {len(audio_bytes)} bytes | VOZ: {tts_voice}")
                     return audio_bytes
+                logger.warning("⚠️ Edge TTS generó audio muy pequeño, intentando fallback Gemini...")
             except Exception as e:
-                logger.warning(f"Error en Edge TTS de respaldo: {e}")
+                logger.warning(f"⚠️ Edge TTS principal falló ({type(e).__name__}: {e}), probando fallback Gemini TTS...")
 
-        # 3. Respaldo: Google TTS (gTTS) con tld='com.ar'
+        # 4. Respaldo: Google TTS (gTTS) con tld='com.ar'
         if HAS_GTTS:
             for tld_option in ['com.ar', 'com']:
                 try:
@@ -389,12 +497,13 @@ class AudioGeneratorAgent:
                     fp.seek(0)
                     data = fp.getvalue()
                     if len(data) > 1000:
+                        self._last_engine = 'gtts'
                         logger.info(f"Audio sintetizado con éxito con Google TTS (gTTS tld={tld_option} - Argentina)")
                         return data
                 except Exception as e:
                     logger.warning(f"Intento Google TTS (tld={tld_option}) falló, probando alternativa: {e}")
 
-        # 4. API Externa personalizada (si está configurada en .env)
+        # 5. API Externa personalizada (si está configurada en .env)
         if self.tts_api_key and self.tts_voice_id and HAS_REQUESTS:
             try:
                 headers = {
@@ -472,40 +581,183 @@ class AudioGeneratorAgent:
             logger.error(f"Excepción subiendo audio: {e}")
         return None
 
+    def _bytes_to_segment(self, audio_bytes: bytes):
+        """Decodifica bytes de audio (mp3/wav) a AudioSegment, o None."""
+        for fmt in ("mp3", "wav"):
+            try:
+                return AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _leading_silence_ms(seg) -> int:
+        from pydub.silence import detect_leading_silence
+        return detect_leading_silence(seg, silence_threshold=seg.dBFS - 16, chunk_size=10)
+
+    @staticmethod
+    def _trailing_silence_ms(seg) -> int:
+        from pydub.silence import detect_leading_silence
+        rev = seg.reverse()
+        return detect_leading_silence(rev, silence_threshold=seg.dBFS - 16, chunk_size=10)
+
+    def _find_seam_silence(self, seg):
+        """
+        Ubica el silencio que separa la noticia de la promo dentro de una
+        sintesis CONTINUA. La promo ocupa el tramo final del audio, asi que el
+        empalme es la pausa mas marcada cuya cola cae en el ultimo tramo.
+        Devuelve (gap_start_ms, gap_end_ms) o None si no es fiable.
+        """
+        from pydub.silence import detect_nonsilent
+        total = len(seg)
+        try:
+            blocks = detect_nonsilent(seg, min_silence_len=150,
+                                       silence_thresh=seg.dBFS - 16, seek_step=10)
+        except Exception:
+            return None
+        if len(blocks) < 2:
+            return None
+        tail_limit = min(int(total * 0.5), 9000)
+        best = None  # (gap_dur, gap_start, gap_end)
+        prev_end = blocks[0][1]
+        for (a, b) in blocks[1:]:
+            gap_start, gap_end = prev_end, a
+            gap = gap_end - gap_start
+            promo_len = total - gap_end
+            in_tail = gap_start >= total - tail_limit
+            plausible_promo = 1200 <= promo_len <= 8500
+            if in_tail and gap >= 150 and plausible_promo:
+                if best is None or gap > best[0]:
+                    best = (gap, gap_start, gap_end)
+            prev_end = b
+        return (best[1], best[2]) if best else None
+
+    def _splice_exact_pause(self, combined_bytes: bytes, pause_ms: int = 1000) -> Optional[bytes]:
+        """
+        Recorta la promo de una sintesis continua y reinserta un silencio EXACTO
+        (pause_ms) entre el final de la noticia y el comienzo de la frase.
+        Devuelve mp3 bytes o None si no puede localizar el empalme.
+        """
+        if not HAS_PYDUB:
+            return None
+        try:
+            seg = self._bytes_to_segment(combined_bytes)
+            if seg is None:
+                return None
+            seam = self._find_seam_silence(seg)
+            if seam is None:
+                logger.warning("  [AudioGeneratorAgent] No localice el empalme noticia/promo; descarto el splice continuo.")
+                return None
+            g_start, g_end = seam
+            news = seg[:g_start]
+            promo = seg[g_end:]
+            # quitar silencios sobrantes a cada lado para que la pausa sea exactamente pause_ms
+            lead = self._leading_silence_ms(promo)
+            if lead > 0:
+                promo = promo[lead:]
+            trail = self._trailing_silence_ms(news)
+            if trail > 0:
+                news = news[:len(news) - trail]
+            joined = news + AudioSegment.silent(duration=pause_ms, frame_rate=seg.frame_rate) + promo
+            buf = io.BytesIO()
+            joined.export(buf, format="mp3")
+            buf.seek(0)
+            logger.info(
+                f"  [AudioGeneratorAgent] Splice OK: noticia {len(news)}ms + pausa exacta {pause_ms}ms + promo {len(promo)}ms"
+            )
+            return buf.read()
+        except Exception as e:
+            logger.warning(f"  [AudioGeneratorAgent] Splice de pausa exacta fallo: {e}")
+            return None
+
+    def _join_with_pause(self, body_bytes: bytes, closing_bytes: bytes, pause_ms: int = 1000) -> Optional[bytes]:
+        """Une dos audios separados con un silencio exacto (fallback de doble sintesis)."""
+        if not HAS_PYDUB or not body_bytes or not closing_bytes:
+            return None
+        try:
+            body_seg = self._bytes_to_segment(body_bytes)
+            closing_seg = self._bytes_to_segment(closing_bytes)
+            if body_seg is None or closing_seg is None:
+                return None
+            lead = self._leading_silence_ms(closing_seg)
+            if lead > 0:
+                closing_seg = closing_seg[lead:]
+            joined = body_seg + AudioSegment.silent(duration=pause_ms, frame_rate=body_seg.frame_rate) + closing_seg
+            buf = io.BytesIO()
+            joined.export(buf, format="mp3")
+            buf.seek(0)
+            return buf.read()
+        except Exception:
+            return None
+
     def process_article_audio(self, article_id: Union[int, str], title: str, text: str, description: str = "") -> Optional[str]:
         """
-        Proceso completo: limpia texto, genera audio con TTS, optimiza, sube a Storage.
+        Proceso completo: limpia texto, genera audio con TTS (voz alternada por
+        noticia), ensambla 1 segundo de silencio + frase institucional al azar,
+        optimiza y sube a Storage.
+        Regla editorial 7.1: la meta_description es exclusiva de SEO y NUNCA se locuta.
         Retorna la URL pública del audio o None si falla.
         """
-        # Construir texto completo para locución
         clean_title = self.clean_text_for_speech(title)
         clean_text = self.clean_text_for_speech(text)
-        clean_desc = self.clean_text_for_speech(description) if description else ""
 
-        # Estructura: Título + Descripción + Texto completo + Frase de cierre
-        speech_parts = []
-        if clean_title:
-            speech_parts.append(clean_title)
-        if clean_desc:
-            speech_parts.append(clean_desc)
-        if clean_text:
-            speech_parts.append(clean_text)
+        # Estructura de locución: Título TTS + Cuerpo radial (+ 1 s silencio + promo)
+        body_parts = [p for p in (clean_title, clean_text) if p]
+        body_speech = ". ".join(body_parts)
+        # Adaptador fonético determinista para Edge TTS (respiración, números en
+        # palabras, siglas desglosadas, extranjerismos rioplatenses)
+        body_speech = adapt_text_for_tts(body_speech, final_pause=True)
 
+        # Voz alternada por noticia (directiva editorial): Tomas / Elena
+        voice = self.next_voice()
         closing_phrase = self.get_random_closing_phrase()
-        speech_parts.append(closing_phrase)
 
-        full_speech = ". ".join(speech_parts)
+        logger.info(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(body_speech)} | VOZ: {voice}")
+        logger.info(f'  [AudioGeneratorAgent] Frase institucional de cierre: "{closing_phrase}"')
 
-        logger.info(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(full_speech)}")
-        logger.info(f"  [AudioGeneratorAgent] Frase institucional de cierre: \"{closing_phrase}\"")
+        # Sintesis CONTINUA noticia + promo en UNA sola corrida del motor: esto
+        # garantiza que la MISMA voz, con el mismo tono, ritmo, enfasis y energia
+        # diga la frase institucional (evita que cuerpo y promo caigan en motores
+        # o voces distintas). Luego se normaliza el silencio del empalme a 1,000 ms.
+        closing_text = closing_phrase
+        combined_speech = f"{body_speech} {closing_text}"
+        audio_bytes = None
+        combined_audio = self.text_to_speech(combined_speech, voice=voice)
+        if combined_audio:
+            audio_bytes = self._splice_exact_pause(combined_audio, pause_ms=1000)
+            if audio_bytes is None:
+                logger.info("  [AudioGeneratorAgent] Splice continuo no disponible; armo con doble sintesis de respaldo.")
 
-        # Generar audio con TTS
-        audio_bytes = self.text_to_speech(full_speech)
-        if not audio_bytes:
-            return None
+        # Fallback: si la sintesis continua o el splice fallaron, generar por separado
+        # con la MISMA voz y SIN tono institucional (para no despegar la promo).
+        if audio_bytes is None:
+            body_audio = self.text_to_speech(body_speech, voice=voice)
+            if not body_audio:
+                return None
+            # Forzar en la promo el MISMO motor que funcionó para el cuerpo: así
+            # la voz de la frase institucional no cambia aunque el rotador de keys
+            # haya agotado Gemini justo en la segunda llamada.
+            engine_cuerpo = getattr(self, '_last_engine', None)
+            closing_audio = self.text_to_speech(closing_text, voice=voice, prefer_engine=engine_cuerpo)
+            if closing_audio:
+                audio_bytes = self._join_with_pause(body_audio, closing_audio, pause_ms=1000)
+            if audio_bytes is None:
+                audio_bytes = body_audio
+                logger.warning("  [AudioGeneratorAgent] No se pudo anexar la frase de cierre; se publica solo el cuerpo.")
 
         # Optimizar audio (normalizar, filtrar, MP3 128kbps)
         audio_bytes = self.optimize_audio(audio_bytes)
+
+        # Duración REAL del audio final (incluye pausa de 1s + frase institucional).
+        # El orquestador la usa para que el slide dure exactamente lo que dura
+        # la locución, y así suene siempre completa hasta el final.
+        try:
+            _seg = self._bytes_to_segment(audio_bytes)
+            self.last_audio_duration = len(_seg) / 1000.0
+            logger.info(f"  [AudioGeneratorAgent] Duración final del audio: {self.last_audio_duration:.1f}s")
+        except Exception as e:
+            logger.warning(f"  [AudioGeneratorAgent] No se pudo medir duración: {e}")
+            self.last_audio_duration = None
 
         # Subir a Supabase Storage
         audio_url = self.upload_audio(article_id, audio_bytes, title)
@@ -534,6 +786,9 @@ class AudioGeneratorAgent:
             )
             results[art_id] = audio_url
             art['audio_url'] = audio_url
+            _dur = getattr(self, 'last_audio_duration', None)
+            if _dur:
+                art['audio_duration'] = round(_dur, 1)
             time.sleep(1.5)  # Cortesía entre llamadas de TTS
 
         return results

@@ -205,7 +205,7 @@ class StorageAgent:
             return None
 
         now_iso = datetime.now().isoformat()
-        patch_payload = {
+        patch_payload: dict = {
             'updatedAt': now_iso
         }
 
@@ -245,6 +245,16 @@ class StorageAgent:
 
         if final_audio_url:
             patch_payload['audio_url'] = final_audio_url
+
+        # Duración REAL del audio (locución completa + pausa 1s + promo): manda en
+        # animation_duration para que el reproductor sepa cuánto debe sonar la
+        # noticia antes de volver al video de YouTube.
+        _adur = ai_data.get('audio_duration') if ai_data else None
+        if _adur:
+            try:
+                patch_payload['animation_duration'] = float(_adur)
+            except (TypeError, ValueError):
+                pass
 
         if final_slide_url:
             patch_payload['url_slide'] = final_slide_url
@@ -296,7 +306,7 @@ class StorageAgent:
             resp = requests.get(
                 self.base_rest_url,
                 params={
-                    'select': 'id,title,text,slug,status,is_published,created_at,updatedAt',
+                    'select': 'id,title,text,slug,status,is_published,created_at,updatedAt,audio_url,url_slide,image_url,og_image_url,thumbnail_url',
                     'created_at': f'gte.{cutoff}',
                     'order': 'created_at.desc',
                     'limit': limit,

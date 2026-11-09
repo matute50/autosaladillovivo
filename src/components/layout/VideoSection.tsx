@@ -169,15 +169,24 @@ const VideoSection: React.FC = () => {
       pauseForSlide();
       hasStartedAudioRef.current = false; 
 
-      // Duración dinámica: 100% de la duración del audio más 1s de margen natural
-      const effectiveAudioDuration = (audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0)
-        ? (audioDurationSec + 1)
-        : (typeof currentSlide === 'object' && currentSlide?.duration ? Math.max(currentSlide.duration, 35) : 40);
+      // Con audio conocido: la locución debe sonar COMPLETA (hasta el final del
+      // texto de la noticia, incluida la frase promocional final). El slide NO
+      // se corta con fade ni antes de tiempo: se cierra solo cuando el audio
+      // termina (onEnded) o, como respaldo, al vencer la duración real + margen.
+      // Sin audio conocido: se usa la duración configurada del slide.
+      const hasKnownAudio = !!(audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0);
+      const slideDur = (typeof currentSlide === 'object' && currentSlide?.duration) ? Number(currentSlide.duration) : 0;
+      const effectiveAudioDuration = hasKnownAudio
+        // margen de seguridad: nunca pisa el final de la locución
+        ? Math.max(audioDurationSec! + 3, slideDur)
+        : (slideDur > 5 ? Math.max(slideDur, 35) : 40);
       const duration = effectiveAudioDuration * 1000;
-      const fadeOutDuration = 1000; // 1 segundo de fade out
-      
-      // Timer para el fade out
-      const fadeOutTimer = setTimeout(() => {
+      const fadeOutDuration = 1000; // 1 segundo de fade out (solo sin audio: slides animados)
+
+      // Timer para el fade out — SOLO si no hay audio que proteger.
+      // Con audio, el fade cortaba la última sílaba de la frase promocional
+      // exactamente en la cola de la locución.
+      const fadeOutTimer = hasKnownAudio ? null : setTimeout(() => {
         if (audioRef.current) {
           const steps = 20;
           const intervalTime = fadeOutDuration / steps;
@@ -201,7 +210,7 @@ const VideoSection: React.FC = () => {
 
       return () => {
         clearTimeout(timer);
-        clearTimeout(fadeOutTimer);
+        if (fadeOutTimer) clearTimeout(fadeOutTimer);
       };
     }
   }, [isHtmlSlideActive, currentSlide?.url, audioDurationSec, stopSlide, resumeAfterSlide, pauseForSlide]);

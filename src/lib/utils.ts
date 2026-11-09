@@ -77,6 +77,9 @@ export const cleanTitle = (title: string | undefined | null): string => {
   return title
     .replace(/[¨"'“”‘’«»|]/g, '')
     .trim()
+    .split(' ')
+    .slice(0, 8)
+    .join(' ')
     .toUpperCase();
 };
 

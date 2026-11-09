@@ -106,7 +106,9 @@ const TvContentRail: React.FC<TvContentRailProps> = ({ searchResults, isSearchin
       const rawAudio = newsItem.audio_url || newsItem.audioUrl || newsItem.audioSourceUrl || newsItem.media_url || (newsItem.audio ? newsItem.audio.url : undefined);
       const audioUrl = getProcessedAudioUrl(rawAudio);
       const urlSlide = newsItem.url_slide || newsItem.urlSlide;
-      const duration = newsItem.animation_duration || newsItem.duration || 15;
+      // Duración = la real del audio (animation_duration en DB, = locución + 1s de cola).
+      // Si viene vacía (artículos viejos), 0: el reproductor espera el fin del audio.
+      const duration = newsItem.animation_duration || newsItem.duration || 0;
       const isHtmlSlide = urlSlide && urlSlide.endsWith('.html');
 
       console.group(`[TvRail-Click] ${title}`);

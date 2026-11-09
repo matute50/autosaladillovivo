@@ -40,6 +40,7 @@ from .ai_rewriter_agent import AiRewriterAgent
 from .audio_generator_agent import AudioGeneratorAgent
 from .slide_generator_agent import SlideGeneratorAgent
 from .publisher_agent import PublisherAgent
+from .qa_agent import QAAuditor, QAConfig
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -83,6 +84,12 @@ class OrchestratorAgent:
         self.audio_agent = AudioGeneratorAgent()
         self.slide_agent = SlideGeneratorAgent()
         self.publisher_agent = PublisherAgent(self.storage_agent)
+        # Agente de auditoría QA
+        try:
+            self.qa = QAAuditor(QAConfig.from_env())
+        except Exception as e:
+            logger.warning(f"[QA] Fallo al inicializar: {e}, función de auditoría desactivada")
+            self.qa = None
 
     def get_next_execution_time(self, current_dt=None):
         """
@@ -211,6 +218,28 @@ class OrchestratorAgent:
 
             logger.info(f"✅ [PASO 2/6] Artículos listos para procesar: {len(articles_to_process)}.")
 
+            # ── Auditoría QA Paso 2 ── Verificar calidad de imágenes capturadas
+            if self.qa:
+                qa_results = [self.qa.audit_scraped_article(a) for a in articles_to_process]
+                qa_pass = sum(1 for r in qa_results if r.is_ok())
+                qa_errors = sum(1 for r in qa_results if r.severity == 'error')
+                logger.info(f"  [QA-Paso2] Aprobados: {qa_pass}/{len(articles_to_process)}，errores: {qa_errors}")
+                # Reparar automáticamente URLs de imagen problemáticas (buscar mejor imagen en la lista de images)
+                for art, qa_res in zip(articles_to_process, qa_results):
+                    if qa_res.severity == 'error' and any(i['field'] == 'image_url' for i in qa_res.issues):
+                        # Intentar encontrar una buena imagen de la lista art['images']
+                        candidate_imgs = art.get('images', [])
+                        fixed = False
+                        for cand in candidate_imgs:
+                            if QAAuditor.is_valid_image_url(cand) and cand != art.get('image_url'):
+                                logger.info(f"  [QA-Paso2] Reparación automática article={art.get('id')} imagen → {cand[:70]}")
+                                art['image_url'] = cand
+                                art['og_image_url'] = cand
+                                fixed = True
+                                break
+                        if not fixed:
+                            logger.warning(f"  [QA-Paso2] No se pudo reparar article={art.get('id')} problema de imagen: {[i['message'] for i in qa_res.issues if i['field']=='image_url']}")
+
         if not articles_to_process:
             if duplicate_articles:
                 logger.info("ℹ️ No se publicaron notas nuevas: todas las candidatas ya fueron tratadas o son actualizaciones menores.")
@@ -238,6 +267,18 @@ class OrchestratorAgent:
 
         logger.info(f"✅ [PASO 3/6] Modificación con IA completada: {len(modified_list)} artículos listos.")
 
+        # ── Auditoría QA Paso 3 ── Verificar resultados de reescritura IA
+        if self.qa:
+            qa_results_r = [self.qa.audit_rewritten_article(a) for a in modified_list]
+            qa_pass = sum(1 for r in qa_results_r if r.is_ok())
+            qa_errors = sum(1 for r in qa_results_r if r.severity == 'error')
+            qa_warns = sum(1 for r in qa_results_r if r.severity == 'warning')
+            logger.info(f"  [QA-Paso3] Aprobados: {qa_pass}/{len(modified_list)}，alertas: {qa_warns}，errores: {qa_errors}")
+            for art, qa_res in zip(modified_list, qa_results_r):
+                if qa_res.severity in ('error', 'warning'):
+                    issues_str = '; '.join(f"{i['field']}:{i['message']}" for i in qa_res.issues)
+                    logger.warning(f"  [QA-Paso3] {art.get('titulo_ia','?')[:40]}... → {issues_str}")
+
         # ----------------------------------------------------------------------
         # PASO 4: GENERACIÓN Y OPTIMIZACIÓN DE AUDIO
         # ----------------------------------------------------------------------
@@ -258,6 +299,11 @@ class OrchestratorAgent:
                 )
                 if audio_url:
                     art['audio_url'] = audio_url
+                    # Duración real del audio final: el slide debe durar exactamente
+                    # lo que dura la locución (incluye pausa de 1s + frase institucional)
+                    _dur = getattr(self.audio_agent, 'last_audio_duration', None)
+                    if _dur:
+                        art['audio_duration'] = round(_dur, 1)
                     audios_generated += 1
                 time.sleep(1.2)
             logger.info(f"✅ [PASO 4/7] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
@@ -326,6 +372,61 @@ class OrchestratorAgent:
             time.sleep(0.5)
 
         logger.info(f"✅ [PASO 7/7] Publicación completada: {published_count}/{len(modified_list)} noticias en vivo.")
+
+        # ── Auditoría QA Final (Paso 7) ── Verificación post-publicación
+        final_qa_report = {'total': 0, 'ok': 0, 'warnings': 0, 'errors': 0, 'error_rate_pct': 0, 'status': 'passed'}
+        if self.qa and modified_list:
+            try:
+                from .storage_agent import StorageAgent as SA
+                sa_check = SA()
+                recent = sa_check.find_recent_processed_articles(days=1, limit=50)
+                qa_final = self.qa.batch_audit_published(recent)
+                final_qa_report = self.qa.generate_report(qa_final)
+                logger.info(f"  [QA-Final] Último día publicado: total={final_qa_report['total']}, "
+                            f"aprobados={final_qa_report['ok']}, alertas={final_qa_report['warnings']}, "
+                            f"errores={final_qa_report['errors']}, estado={final_qa_report['status']}")
+                if final_qa_report['errors'] > 0:
+                    for err_art in final_qa_report.get('error_articles', []):
+                        logger.error(f"  [QA-Final ERROR] ID={err_art['article_id']} título={err_art['title'][:50]}: "
+                                     f"{[i['message'] for i in err_art['issues']]}")
+
+                # ── Verificación de imágenes duplicadas en TODOS los publicados ──
+                try:
+                    dup_report = self.qa.detect_and_fix_duplicate_images()
+                    if dup_report.get('status') == 'skipped':
+                        logger.info(f"  [QA-DupImg] Omiso: {dup_report.get('reason', '')}")
+                    elif dup_report.get('status') == 'error':
+                        logger.error(f"  [QA-DupImg] Error: {dup_report}")
+                    else:
+                        logger.info(f"  [QA-DupImg] Artículos: {dup_report['total_articulos']}, "
+                                    f"únicas: {dup_report['imagenes_unicas']}, "
+                                    f"duplicados: {dup_report['grupos_duplicados']}, "
+                                    f"fijados: {dup_report['fijados']}, "
+                                    f"no_fijados: {dup_report['no_fijados']}")
+                except Exception as e:
+                    logger.warning(f"[QA-DupImg] Excepción: {e}")
+
+                # ── Verificación de cron health ──
+                try:
+                    cron_report = self.qa.check_cron_health()
+                    if cron_report.get('status') == 'ok':
+                        logger.info(f"  [QA-Cron] ✅ Pipeline cron OK — Último: {cron_report['last_run']}, Próximo: {cron_report['next_run']} ({cron_report['schedule']})")
+                    elif cron_report.get('status') == 'warning':
+                        logger.warning(f"  [QA-Cron] ⚠️ Cron con advertencias: {cron_report['issues']}")
+                    elif cron_report.get('status') == 'missing':
+                        logger.error(f"  [QA-Cron] ❌ CRÍTICO: {cron_report['issues']}")
+                    else:
+                        logger.error(f"  [QA-Cron] ❌ Error: {cron_report['issues']}")
+
+                    # Log de issues de otros jobs
+                    for issue in cron_report.get('issues', []):
+                        if 'freellmapi' in issue.lower() or 'cron-health' in issue.lower():
+                            logger.warning(f"  [QA-Cron] Job auxiliar con issues: {issue}")
+
+                except Exception as e:
+                    logger.warning(f"[QA-Cron] Excepción: {e}")
+            except Exception as e:
+                logger.warning(f"[QA-Final] Excepción en auditoría final: {e}")
 
         # Generar reporte de ciclo
         duration = datetime.now() - start_time

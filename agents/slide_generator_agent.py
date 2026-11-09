@@ -289,7 +289,10 @@ class SlideGeneratorAgent:
 
     def text_to_speech_rioplatense(self, text: str, language: str = 'es-ES') -> Optional[bytes]:
         """
-        Convierte texto a audio con auténtico acento rioplatense (es-AR) usando Edge TTS (o fallback gTTS).
+        Convierte texto a audio con acento rioplatense auténtico.
+        Motor EXCLUSIVO: Voxtral TTS (voz femenina Elena voice_483) + preprocesamiento
+        fonético (SOUL.md + skill tts-rioplatense-phonetics).
+        Prohibido: Edge TTS / gTTS / Gemini TTS (directiva del usuario).
         """
         if not text:
             return None
@@ -298,48 +301,26 @@ class SlideGeneratorAgent:
         if len(clean_text) > 4000:
             clean_text = clean_text[:4000].rsplit('.', 1)[0] + "."
 
-        # 1. Edge TTS con voz rioplatense auténtica (Elena / Tomás)
-        if HAS_EDGE_TTS:
+        try:
+            from saladillo_tts_preprocessor import generate_audio
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+                temp_output = tmp_file.name
             try:
-                async def _synthesize():
-                    comm = edge_tts.Communicate(clean_text, self.voice)
-                    audio_data = bytearray()
-                    async for chunk in comm.stream():
-                        if chunk.get("type") == "audio":
-                            audio_data.extend(chunk["data"])
-                    return bytes(audio_data)
-
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                            audio_bytes = executor.submit(asyncio.run, _synthesize()).result(timeout=30)
-                    else:
-                        audio_bytes = loop.run_until_complete(_synthesize())
-                except RuntimeError:
-                    audio_bytes = asyncio.run(_synthesize())
-
-                if audio_bytes and len(audio_bytes) > 1000:
-                    self.logger.info(f"Voz rioplatense sintetizada exitosamente ({self.voice}): {len(audio_bytes)} bytes")
+                generate_audio(clean_text, temp_output)
+                if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
+                    with open(temp_output, 'rb') as f:
+                        audio_bytes = f.read()
+                    self.logger.info(f"Voz rioplatense Voxtral (Elena, femenina) sintetizada: {len(audio_bytes)} bytes")
                     return audio_bytes
-            except Exception as e:
-                self.logger.warning(f"Error en Edge TTS rioplatense ({self.voice}): {e}")
-
-        # 2. Fallback gTTS
-        if HAS_GTTS:
-            for tld in ['com.ar', 'com']:
-                try:
-                    tts = gTTS(text=clean_text, lang=language, slow=False, tld=tld)
-                    fp = io.BytesIO()
-                    tts.write_to_fp(fp)
-                    fp.seek(0)
-                    audio_bytes = fp.read()
-                    if audio_bytes:
-                        return audio_bytes
-                except Exception as e:
-                    self.logger.warning(f"Intento TTS fallback con tld={tld} falló: {e}")
-
+            finally:
+                if os.path.exists(temp_output):
+                    try:
+                        os.unlink(temp_output)
+                    except Exception:
+                        pass
+        except Exception as e:
+            self.logger.error(f"Voxtral TTS en slides falló: {e}")
         return None
 
     def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
@@ -353,7 +334,7 @@ class SlideGeneratorAgent:
         processed_images: List[Dict] = []
 
         if not image_urls:
-            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
+            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": False}]
 
         for i, image_url in enumerate(image_urls):
             if not image_url:
@@ -366,23 +347,40 @@ class SlideGeneratorAgent:
                         if resp.status_code == 200:
                             raw_bytes = resp.content
 
+                            # 0. Verificar resolución de la imagen
+                            enable_kb = True
+                            min_width, min_height = 800, 600
+                            if HAS_PIL:
+                                try:
+                                    test_img = Image.open(io.BytesIO(raw_bytes))
+                                    w, h = test_img.size
+                                    if w < min_width or h < min_height:
+                                        enable_kb = False
+                                        self.logger.info(f"  [SlideGen] Imagen {i} baja resolución ({w}x{h}) → Ken Burns desactivado")
+                                except Exception:
+                                    pass
+
                             # 1. Determinar centro de atención con visión artificial
                             focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
 
-                            # 2. Mejorar brillo, contraste e intensidad automáticamente
-                            enhanced_bytes = self.enhance_image_ai(raw_bytes)
+                            # 2. Mejorar brillo, contraste e intensidad solo si hay resolución suficiente
+                            if enable_kb:
+                                enhanced_bytes = self.enhance_image_ai(raw_bytes)
 
-                            # 3. Subir imagen mejorada a Supabase Storage
-                            img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
-                            filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
-                            uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
-                            final_url = uploaded_url or image_url
+                                # 3. Subir imagen mejorada a Supabase Storage
+                                img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
+                                filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
+                                uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
+                                final_url = uploaded_url or image_url
+                            else:
+                                final_url = image_url
 
                             processed_images.append({
                                 "url": final_url,
                                 "focal_x": focal_x,
                                 "focal_y": focal_y,
-                                "method": method
+                                "method": method,
+                                "enable_ken_burns": enable_kb
                             })
                             continue
 
@@ -393,10 +391,11 @@ class SlideGeneratorAgent:
                 "url": image_url,
                 "focal_x": 50.0,
                 "focal_y": 45.0,
-                "method": "fallback"
+                "method": "fallback",
+                "enable_ken_burns": False
             })
 
-        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default"}]
+        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": False}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
                           audio_url: str, images: List[str], audio_duration: Optional[float] = None) -> str:
@@ -485,6 +484,11 @@ class SlideGeneratorAgent:
             animation: kenBurnsZoom var(--slide-audio-duration, 36s) ease-in-out infinite;
         }
 
+        /* Desactivar Ken Burns para imágenes de baja resolución */
+        .photo-main.no-ken-burns {
+            animation: none;
+        }
+
         /*
            Animación Ken Burns adaptada a la duración exacta del audio:
            Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
@@ -517,7 +521,7 @@ class SlideGeneratorAgent:
         {% for img in images %}
         <div class="photo-slide {% if loop.first %}active{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
-            <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
+            <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main{% if not (img.enable_ken_burns is defined and img.enable_ken_burns) %} no-ken-burns{% endif %}"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
                  onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
