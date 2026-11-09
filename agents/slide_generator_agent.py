@@ -17,6 +17,8 @@ Características:
 import os
 import io
 import sys
+import re
+import json
 import time
 import hashlib
 import logging
@@ -92,79 +94,332 @@ class SlideGeneratorAgent:
         duration = (words / 2.08) + 1.0 + 3.0
         return max(20.0, min(round(duration, 1), 120.0))
 
-    def detect_attention_center(self, image_bytes: bytes):
+    def generate_default_visuals(self, title: str, text: str) -> Dict:
         """
-        Determina el centro de atención de la imagen utilizando visión por computadora:
-        - Si hay 1 persona: rostro de la persona (altura de los ojos).
-        - Si hay más de 1 persona: punto medio equidistante entre todos los rostros.
-        - Si es un objeto, vehículo o animal: centroide del cuerpo u objeto principal por saliencia.
-        - Fallback editorial: (50.0, 45.0) proporción áurea.
-        Retorna (focal_x_pct, focal_y_pct, method_desc).
+        Genera metadatos estructurados para lower thirds y placa central TV-Grade
+        en caso de que no hayan sido provistos por el modelo de IA.
+        """
+        t_lower = f"{title} {text}".lower()
+
+        # Determinar Kicker / Categoría según temática local
+        if any(k in t_lower for k in ['obras', 'paviment', 'asfalto', 'cordón', 'vial', 'iluminaci', 'bacheo']):
+            kicker = "OBRAS PÚBLICAS"
+        elif any(k in t_lower for k in ['polic', 'comisar', 'detuv', 'rob', 'aprehend', 'allanamiento', 'delit']):
+            kicker = "POLICIALES"
+        elif any(k in t_lower for k in ['salud', 'hospital', 'médic', 'caps', 'enferm', 'vacun']):
+            kicker = "SALUD"
+        elif any(k in t_lower for k in ['deport', 'fútbol', 'básquet', 'campeón', 'ciclism', 'automovilism']):
+            kicker = "DEPORTES"
+        elif any(k in t_lower for k in ['cultur', 'teatro', 'músic', 'cine', 'taller', 'fiesta']):
+            kicker = "CULTURA"
+        elif any(k in t_lower for k in ['educac', 'escuel', 'alumn', 'docent', 'jardín']):
+            kicker = "EDUCACIÓN"
+        elif any(k in t_lower for k in ['agro', 'rural', 'camp', 'cosech', 'ganad']):
+            kicker = "AGRO Y PRODUCCIÓN"
+        elif any(k in t_lower for k in ['municip', 'intendente', 'concej', 'salomón']):
+            kicker = "MUNICIPIO"
+        else:
+            kicker = "SALADILLO VIVO"
+
+        clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
+        words = clean_title.split()
+        titular_apertura = " ".join(words[:10]).rstrip(' ,.:;')
+
+        quote_match = re.search(r'["“]([^"”]{15,120})["”]', text)
+        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones|mil)?|\d+\s*(?:millones|cuadras|viviendas|hectáreas|alumnos|casos|efectivos|%))', text, re.IGNORECASE)
+
+        if quote_match:
+            tipo_placa = "CITA"
+            placa = {
+                "titulo": "DECLARACIÓN",
+                "destacado": f'"{quote_match.group(1).strip()}"',
+                "bajada": "Testimonio en Saladillo Vivo"
+            }
+        elif stat_match:
+            tipo_placa = "DATO_NUMERICO"
+            placa = {
+                "titulo": "CIFRA DESTACADA",
+                "destacado": stat_match.group(1).upper().strip(),
+                "bajada": "Dato central del informe periodístico"
+            }
+        else:
+            tipo_placa = "RESUMEN"
+            sentences = [s.strip() for s in re.split(r'[\.\n]+', text) if len(s.strip()) > 25]
+            summary_text = sentences[0] if sentences else titular_apertura
+            if len(summary_text) > 85:
+                summary_text = summary_text[:82].rsplit(' ', 1)[0] + '...'
+            placa = {
+                "titulo": "SÍNTESIS",
+                "destacado": summary_text,
+                "bajada": "Cobertura especial Saladillo Vivo"
+            }
+
+        remate = "Más detalles en saladillovivo.com.ar"
+        sentences = [s.strip() for s in re.split(r'[\.\n]+', text) if len(s.strip()) > 20]
+        if len(sentences) >= 2:
+            last_s = sentences[-1]
+            last_words = last_s.split()
+            if 3 <= len(last_words) <= 12:
+                remate = " ".join(last_words).rstrip(' ,.:;')
+
+        return {
+            "kicker": kicker,
+            "titular_apertura": titular_apertura,
+            "tipo_placa": tipo_placa,
+            "placa": placa,
+            "remate": remate
+        }
+
+    def detect_banner_or_sign_title(self, gray, w, h):
+        """
+        Detecta el título principal dentro de un cartel, banner o fotografía de letrero:
+        Identifica la línea de texto con mayor tamaño tipográfico (altura de caracteres),
+        mayor extensión horizontal y ponderación de ubicación en el tercio/mitad superior.
+        Retorna (title_x, title_y, found_title).
+        """
+        total_area = float(w * h)
+
+        # Gradiente morfológico para aislar los trazos de caracteres tipográficos
+        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+
+        # Conectar caracteres horizontales para agrupar palabras en líneas de titular
+        kernel_line = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 4))
+        connected = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_line)
+        contours, _ = cv2.findContours(connected, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        candidates = []
+        for c in contours:
+            x, y, bw, bh = cv2.boundingRect(c)
+            area = bw * bh
+            # Descartar marcos exteriores gigantes (área > 35% del total o ancho > 95%)
+            if area > 0.35 * total_area or bw > 0.95 * w or bh > 0.90 * h:
+                continue
+
+            ratio = bw / float(bh) if bh > 0 else 0
+            # Bloque de texto válido para titular: ratio horizontal >= 1.3 y altura mínima apreciable
+            if ratio >= 1.3 and (0.015 * h <= bh <= 0.25 * h) and (0.001 * total_area <= area <= 0.22 * total_area):
+                y_center_pct = (y + bh / 2.0) / float(h)
+                # Bonificación para la mitad superior y media donde se ubican los títulos principales
+                pos_bonus = 1.40 if (0.10 <= y_center_pct <= 0.58) else 0.85
+                # La altura del texto al cuadrado da prioridad exponencial al tamaño tipográfico del titular
+                importance = (bh ** 2) * bw * pos_bonus
+                candidates.append((importance, x, y, bw, bh))
+
+        if candidates:
+            # Agrupar fragmentos de la misma línea de titular (mismo nivel Y)
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            best_imp, tx, ty, tbw, tbh = candidates[0]
+
+            same_line = [c for c in candidates if abs((c[2] + c[4]/2.0) - (ty + tbh/2.0)) < (tbh * 0.75)]
+            if same_line:
+                min_x = min(c[1] for c in same_line)
+                max_x = max(c[1] + c[3] for c in same_line)
+                avg_y = sum(c[2] + c[4]/2.0 for c in same_line) / len(same_line)
+                cx = ((min_x + max_x) / 2.0) / float(w) * 100.0
+                cy = avg_y / float(h) * 100.0
+            else:
+                cx = (tx + tbw / 2.0) / float(w) * 100.0
+                cy = (ty + tbh / 2.0) / float(h) * 100.0
+
+            # Clampeo de seguridad para que el título no quede pegado a bordes extremos
+            cx = max(18.0, min(cx, 82.0))
+            cy = max(18.0, min(cy, 75.0))
+            return round(cx, 1), round(cy, 1), True
+
+        return 50.0, 38.0, False
+
+    def detect_attention_center(self, image_bytes: bytes, image_url: str = ""):
+        """
+        Determina con IA y visión por computadora el punto de atención, encuadre y tipo de composición:
+
+        1. PERSONAS / ROSTROS (Prioridad Absoluta):
+           - Si hay una o varias personas, el foco siempre son las personas por sobre otros objetos.
+           - Calcula el centro del grupo/persona y aplica control de Headroom visual:
+             evita "techo" excesivo anclando el foco vertical entre el 33% y 46% (tercio superior cinematográfico),
+             garantizando equilibrio visual entre la imagen original y el zoom in.
+
+        2. BANNERS, AFICHES O FOTOGRAFÍAS A CARTELES/BANNERS:
+           - Si se trata de un banner digital o de una FOTOGRAFÍA TOMADA A UN CARTEL O BANNER:
+             detecta el TÍTULO PRINCIPAL del cartel/banner y lo establece como centro de atención.
+             Aplica la regla de contención del 100% de superficie para que la información permanezca
+             completamente visible sin recortes en la animación Ken Burns.
+
+        3. EDIFICIOS / FACHADAS:
+           - Detecta carteles o leyendas en la fachada y centra el zoom in sobre la leyenda.
+           - Si no hay cartel, encuadra con equilibrio visual arquitectónico en la fachada.
+
+        Retorna: (focal_x_pct, focal_y_pct, is_banner, method_desc)
         """
         if not HAS_CV2 or not HAS_NUMPY:
-            return 50.0, 45.0, "fallback_sin_cv"
+            return 50.0, 45.0, False, "fallback_sin_cv"
 
         try:
             nparr = np.frombuffer(image_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             if img_bgr is None:
-                return 50.0, 45.0, "error_decodificacion"
+                return 50.0, 45.0, False, "error_decodificacion"
 
             h, w = img_bgr.shape[:2]
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+            total_area = float(w * h)
 
-            # 1. Detección de rostros humanos (frontal) — Fallback si falla CascadeClassifier
-            faces = []
-            try:
-                if hasattr(cv2, 'CascadeClassifier') and hasattr(cv2, 'data') and hasattr(cv2.data, 'haarcascades'):
-                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
-            except Exception as e:
-                logger.warning(f"  [SlideGeneratorAgent] Error de OpenCV (detección omitida): {e}")
+            # ==================================================================
+            # 1. PERSONAS / ROSTROS (PRIORIDAD ABSOLUTA SOBRE CUALQUIER OTRO OBJETO)
+            # ==================================================================
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+            upperbody_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_upperbody.xml')
 
-            if len(faces) == 1:
-                x, y, fw, fh = faces[0]
-                cx = (x + fw / 2.0) / w * 100.0
-                cy = (y + fh * 0.45) / h * 100.0
-                self.logger.info(f"Centro de atención: 1 rostro en ({cx:.1f}%, {cy:.1f}%)")
-                return round(float(cx), 1), round(float(cy), 1), "rostro_persona"
+            faces = list(face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28)))
+            if not faces and not profile_cascade.empty():
+                profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(28, 28))
+                if len(profiles) > 0:
+                    faces = list(profiles)
 
-            elif len(faces) > 1:
-                # Punto medio equidistante entre todos los rostros detectados
-                avg_x = sum((x + fw / 2.0) for (x, y, fw, fh) in faces) / len(faces)
-                avg_y = sum((y + fh * 0.45) for (x, y, fw, fh) in faces) / len(faces)
-                cx = (avg_x / w) * 100.0
-                cy = (avg_y / h) * 100.0
-                self.logger.info(f"Centro de atención: {len(faces)} rostros equidistante en ({cx:.1f}%, {cy:.1f}%)")
-                return round(float(cx), 1), round(float(cy), 1), f"equidistante_{len(faces)}_personas"
+            if faces:
+                # Centro horizontal ponderado de todos los rostros del grupo
+                min_x = min(f[0] for f in faces)
+                max_x = max(f[0] + f[2] for f in faces)
+                group_center_x = (min_x + max_x) / 2.0
+                focal_x = (group_center_x / w) * 100.0
 
-            # 2. Detección de objeto / animal / sujeto principal mediante saliencia y contornos
+                # Headroom visual cinematográfico inteligente:
+                # Evita dejar excesivo espacio de 'techo' arriba de las cabezas al hacer zoom in.
+                # Se toma el tope del rostro más alto y se desciende hacia la línea clavicular/pecho
+                # para que al hacer zoom la cabeza quede en el tercio superior armónico (33% - 46%)
+                highest_face_top = min(f[1] for f in faces)
+                avg_face_height = sum(f[3] for f in faces) / len(faces)
+                target_y = highest_face_top + (avg_face_height * 0.90)
+                focal_y = (target_y / h) * 100.0
+
+                # Clampeo de equilibrio visual para evitar techos excesivos
+                focal_y = max(33.0, min(focal_y, 46.0))
+                focal_x = max(20.0, min(focal_x, 80.0))
+
+                desc = f"personas_{len(faces)}_rostros_headroom_balance"
+                self.logger.info(f"Centro de atención: {desc} en ({focal_x:.1f}%, {focal_y:.1f}%)")
+                return round(float(focal_x), 1), round(float(focal_y), 1), False, desc
+
+            # Detección de personas mediante torso superior si los rostros no son frontales
+            if not upperbody_cascade.empty():
+                bodies = upperbody_cascade.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=3, minSize=(60, 60))
+                if len(bodies) > 0:
+                    b = max(bodies, key=lambda x: x[2] * x[3])
+                    bx = (b[0] + b[2] / 2.0) / w * 100.0
+                    by = (b[1] + b[3] * 0.35) / h * 100.0
+                    by = max(33.0, min(by, 46.0))
+                    bx = max(20.0, min(bx, 80.0))
+                    self.logger.info(f"Centro de atención: persona torso en ({bx:.1f}%, {by:.1f}%)")
+                    return round(float(bx), 1), round(float(by), 1), False, "persona_cuerpo_superior"
+
+            # ==================================================================
+            # 2. BANNERS, AFICHES O FOTOGRAFÍAS A CARTELES / BANNERS
+            # ==================================================================
+            # Detección de densidad morfológica de texto y caracteres
+            grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+            _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+            kernel_text = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 3))
+            text_blobs = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_text)
+            contours, _ = cv2.findContours(text_blobs, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            text_area_sum = 0
+            candidate_signs = []
+            for c in contours:
+                area = cv2.contourArea(c)
+                if area > 0.002 * total_area:
+                    text_area_sum += area
+                    x_c, y_c, w_c, h_c = cv2.boundingRect(c)
+                    ratio = w_c / float(h_c)
+                    # Signboard / Cartel típico de fachada: ancho > alto (ratio 1.8 a 8.5)
+                    if 1.8 <= ratio <= 8.5 and (0.008 * total_area < area < 0.22 * total_area):
+                        candidate_signs.append((area, x_c, y_c, w_c, h_c))
+
+            text_coverage = text_area_sum / total_area
+            aspect_ratio = w / float(h)
+            url_lower = image_url.lower()
+
+            is_banner_keyword = any(k in url_lower for k in [
+                'banner', 'flyer', 'afiche', 'cartel', 'promo', 'sorteo', 'programa',
+                'taller', 'inscripcion', 'necrolo', 'farmacia', 'cuadro', 'comunicado', 'aviso',
+                'letrero', 'pasacalle', 'folleto'
+            ])
+
+            # Detectar si es un banner/afiche directo O una fotografía tomada a un cartel/banner
+            is_direct_banner = is_banner_keyword or text_coverage > 0.07 or (aspect_ratio < 1.15 and text_coverage > 0.035)
+
+            # Buscar si existe una estructura rectangular dominante correspondiente a un cartel fotografiado
+            is_photo_of_banner = False
+            if not is_direct_banner and text_coverage > 0.025:
+                # Buscar paneles rectangulares grandes
+                thresh_inv = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+                panel_contours, _ = cv2.findContours(thresh_inv, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                for pc in panel_contours:
+                    pa = cv2.contourArea(pc)
+                    if 0.15 * total_area < pa < 0.85 * total_area:
+                        peri = cv2.arcLength(pc, True)
+                        approx = cv2.approxPolyDP(pc, 0.04 * peri, True)
+                        if len(approx) == 4:  # Cuadrilátero / Cartel fotografiado
+                            is_photo_of_banner = True
+                            break
+
+            if is_direct_banner or is_photo_of_banner:
+                # Detectar con IA el TÍTULO PRINCIPAL del cartel/banner para fijarlo como centro de atención
+                title_x, title_y, found_title = self.detect_banner_or_sign_title(gray, w, h)
+                focal_x = title_x if found_title else 50.0
+                focal_y = title_y if found_title else 38.0
+
+                desc = "foto_a_cartel_titulo_principal" if is_photo_of_banner else "banner_afiche_titulo_principal"
+                self.logger.info(f"Centro de atención: {desc} en ({focal_x:.1f}%, {focal_y:.1f}%). Criterio banner 100% visible.")
+                # Si es banner digital directo o el cartel ocupa casi todo el plano, activar contención 100%
+                return focal_x, focal_y, True, desc
+
+            # ==================================================================
+            # 3. EDIFICIOS / FACHADAS (Búsqueda de cartel, letrero o leyenda)
+            # ==================================================================
+            if candidate_signs:
+                # Seleccionar el cartel más prominente y centrado en la fachada
+                candidate_signs.sort(key=lambda s: s[0], reverse=True)
+                _, sx, sy, sw, sh = candidate_signs[0]
+                sign_x = (sx + sw / 2.0) / w * 100.0
+                sign_y = (sy + sh / 2.0) / h * 100.0
+                # Clampeo para mantener encuadre armónico de la fachada
+                sign_x = max(25.0, min(sign_x, 75.0))
+                sign_y = max(25.0, min(sign_y, 65.0))
+                self.logger.info(f"Centro de atención: cartel/leyenda en fachada en ({sign_x:.1f}%, {sign_y:.1f}%)")
+                return round(float(sign_x), 1), round(float(sign_y), 1), False, "edificio_cartel_leyenda"
+
+            # ==================================================================
+            # 4. FACHADA SIN CARTEL o PAISAJE / GENERAL: Equilibrio visual armónico
+            # ==================================================================
+            # Saliencia suave si hay un objeto claramente dominante
             blurred = cv2.bilateralFilter(gray, 9, 75, 75)
             edges = cv2.Canny(blurred, 45, 140)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-            dilated = cv2.dilate(edges, kernel, iterations=2)
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            dilated = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)), iterations=2)
+            salient_contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            if contours:
-                min_area = 0.025 * w * h
-                valid = [c for c in contours if cv2.contourArea(c) > min_area]
+            if salient_contours:
+                valid = [c for c in salient_contours if cv2.contourArea(c) > 0.04 * total_area]
                 if valid:
                     largest = max(valid, key=cv2.contourArea)
                     M = cv2.moments(largest)
                     if M["m00"] != 0:
                         obj_x = (M["m10"] / M["m00"]) / w * 100.0
                         obj_y = (M["m01"] / M["m00"]) / h * 100.0
-                        self.logger.info(f"Centro de atención: objeto/animal saliente en ({obj_x:.1f}%, {obj_y:.1f}%)")
-                        return round(float(obj_x), 1), round(float(obj_y), 1), "objeto_animal_saliencia"
+                        obj_x = max(25.0, min(obj_x, 75.0))
+                        obj_y = max(35.0, min(obj_y, 55.0))
+                        self.logger.info(f"Centro de atención: objeto saliente en ({obj_x:.1f}%, {obj_y:.1f}%)")
+                        return round(float(obj_x), 1), round(float(obj_y), 1), False, "fachada_objeto_saliencia"
 
         except Exception as e:
             self.logger.warning(f"Excepción detectando centro de atención: {e}")
 
-        return 50.0, 45.0, "centro_editorial"
+        return 50.0, 48.0, False, "fachada_equilibrio_visual"
 
     def enhance_image_ai(self, image_bytes: bytes) -> bytes:
         """
-        Mejora automáticamente brillo, contraste e intensidad (saturación) con perfil cinematográfico TV.
+        Mejora automáticamente brillo, contraste e intensidad (saturación) con perfil cinematográfico TV
+        y garantiza alta resolución Full HD sin artefactos de compresión.
         """
         if not HAS_PIL:
             return image_bytes
@@ -173,6 +428,17 @@ class SlideGeneratorAgent:
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
+
+            # Si la imagen posee dimensiones bajas (< 1200px de ancho y < 800px de alto),
+            # reescalarla a Full HD cinematográfico con interpolación Lanczos de alta fidelidad
+            orig_w, orig_h = img.size
+            if orig_w < 1200 and orig_h < 800 and orig_w > 0 and orig_h > 0:
+                scale = min(1920 / orig_w, 1080 / orig_h)
+                if scale > 1.0:
+                    new_w = int(orig_w * scale)
+                    new_h = int(orig_h * scale)
+                    resampling = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.BICUBIC)
+                    img = img.resize((new_w, new_h), resample=resampling)
 
             # 1. Autocontraste suave para estirar el rango dinámico
             img = ImageOps.autocontrast(img, cutoff=0.3)
@@ -204,7 +470,8 @@ class SlideGeneratorAgent:
             img = ImageEnhance.Sharpness(img).enhance(1.12)
 
             buf = io.BytesIO()
-            img.save(buf, format='JPEG', quality=88, optimize=True)
+            # CALIDAD CINEMATOGRÁFICA MÁXIMA Full HD (quality=95, subsampling=0 para cero artefactos en TV)
+            img.save(buf, format='JPEG', quality=95, optimize=True, subsampling=0)
             return buf.getvalue()
 
         except Exception as e:
@@ -325,10 +592,11 @@ class SlideGeneratorAgent:
 
     def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
         """
-        Procesa, analiza y optimiza imágenes para el slide:
-        1. Determina centro de atención (rostro único, punto medio de rostros, o cuerpo/objeto).
-        2. Aplica mejora automática de brillo, contraste e intensidad de color.
-        3. Aloja la versión optimizada en Supabase Storage.
+        Procesa, analiza y optimiza imágenes para el slide garantizando MÁXIMA RESOLUCIÓN FULL HD:
+        1. Desescala URLs de WordPress a la versión original limpia sin sufijos de recorte (-80x80, etc.).
+        2. Determina centro de atención con visión artificial (rostro, equidistante o saliente).
+        3. Aplica reescalado inteligente Lanczos a Full HD y realce de imagen cinematográfico TV.
+        4. Aloja la versión optimizada en Supabase Storage (JPEG Q95 subsampling=0).
         Retorna una lista de diccionarios con URL, coordenadas focales (focal_x, focal_y) y método.
         """
         processed_images: List[Dict] = []
@@ -337,75 +605,119 @@ class SlideGeneratorAgent:
             return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": False}]
 
         for i, image_url in enumerate(image_urls):
-            if not image_url:
+            if not image_url or not isinstance(image_url, str):
+                continue
+
+            # Descartar avatares, logos o miniaturas explícitas que no sean contenido del artículo
+            lower_url = image_url.lower()
+            if any(k in lower_url for k in ['gravatar', 'avatar', 'logo', 'icon', 'pixel', 'banner']):
                 continue
 
             if image_url.startswith("http://") or image_url.startswith("https://"):
                 try:
+                    # Desescalar a URL nativa Full HD sin sufijos de recorte de WordPress
+                    clean_hd_url = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', image_url, flags=re.I)
+                    # Quitar params de resize en Jetpack/Photon
+                    if '?' in clean_hd_url:
+                        base_u, q_u = clean_hd_url.split('?', 1)
+                        kept = [p for p in q_u.split('&') if not p.lower().startswith(('resize=', 'fit=', 'w=', 'h=', 'strip='))]
+                        clean_hd_url = base_u + ('?' + '&'.join(kept) if kept else '')
+
+                    # Intentar descargar la versión Full HD primero, luego fallback a la original
+                    candidate_urls = [clean_hd_url] if clean_hd_url != image_url else [image_url]
+                    if clean_hd_url != image_url:
+                        candidate_urls.append(image_url)
+
+                    resp = None
+                    downloaded_url = image_url
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+                    }
+
                     if HAS_REQUESTS:
-                        resp = requests.get(image_url, timeout=12, headers={'User-Agent': 'Mozilla/5.0'})
-                        if resp.status_code == 200:
-                            raw_bytes = resp.content
+                        for cand in candidate_urls:
+                            try:
+                                r = requests.get(cand, timeout=14, headers=headers)
+                                if r.status_code == 200 and len(r.content) > 1500:
+                                    resp = r
+                                    downloaded_url = cand
+                                    break
+                            except Exception:
+                                pass
 
-                            # 0. Verificar resolución de la imagen
-                            enable_kb = True
-                            min_width, min_height = 800, 600
-                            if HAS_PIL:
-                                try:
-                                    test_img = Image.open(io.BytesIO(raw_bytes))
-                                    w, h = test_img.size
-                                    if w < min_width or h < min_height:
-                                        enable_kb = False
-                                        self.logger.info(f"  [SlideGen] Imagen {i} baja resolución ({w}x{h}) → Ken Burns desactivado")
-                                except Exception:
-                                    pass
+                    if resp and resp.status_code == 200:
+                        raw_bytes = resp.content
 
-                            # 1. Determinar centro de atención con visión artificial
-                            focal_x, focal_y, method = self.detect_attention_center(raw_bytes)
+                        # 0. Resolución mínima para el zoom de Ken Burns (evita pixelar)
+                        enable_kb = True
+                        if HAS_PIL:
+                            try:
+                                test_img = Image.open(io.BytesIO(raw_bytes))
+                                _w, _h = test_img.size
+                                if _w < 800 or _h < 600:
+                                    enable_kb = False
+                                    self.logger.info(f"  [SlideGen] Imagen {i} baja resolución ({_w}x{_h}) → Ken Burns desactivado")
+                            except Exception:
+                                pass
 
-                            # 2. Mejorar brillo, contraste e intensidad solo si hay resolución suficiente
-                            if enable_kb:
-                                enhanced_bytes = self.enhance_image_ai(raw_bytes)
+                        # 1. Determinar centro de atención, encuadre y tipo con IA / visión por computadora
+                        focal_x, focal_y, is_banner, method = self.detect_attention_center(raw_bytes, downloaded_url)
 
-                                # 3. Subir imagen mejorada a Supabase Storage
-                                img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}".encode()).hexdigest()[:8]
-                                filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
-                                uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
-                                final_url = uploaded_url or image_url
-                            else:
-                                final_url = image_url
+                        # 2. Mejorar brillo, contraste e intensidad en resolución Full HD
+                        enhanced_bytes = self.enhance_image_ai(raw_bytes)
 
-                            processed_images.append({
-                                "url": final_url,
-                                "focal_x": focal_x,
-                                "focal_y": focal_y,
-                                "method": method,
-                                "enable_ken_burns": enable_kb
-                            })
-                            continue
+                        # 3. Subir imagen Full HD optimizada a Supabase Storage
+                        img_hash = hashlib.md5(f"{article_id}_{i}_{focal_x}_{is_banner}".encode()).hexdigest()[:8]
+                        filename = f"img_opt_{article_id}_{i}_{img_hash}.jpg"
+                        uploaded_url = self.upload_image_to_supabase(enhanced_bytes, filename)
+                        final_url = uploaded_url or downloaded_url
+
+                        processed_images.append({
+                            "url": final_url,
+                            "focal_x": focal_x,
+                            "focal_y": focal_y,
+                            "is_banner": is_banner,
+                            "method": method,
+                            "enable_ken_burns": enable_kb
+                        })
+                        continue
 
                 except Exception as e:
                     self.logger.warning(f"Error procesando imagen {i} para artículo {article_id}: {e}")
 
+            # Fallback seguro con desescalado a Full HD
+            fallback_url = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', image_url, flags=re.I)
+            is_fallback_banner = any(k in image_url.lower() for k in ['banner', 'flyer', 'afiche', 'sorteo', 'promo'])
             processed_images.append({
-                "url": image_url,
+                "url": fallback_url,
                 "focal_x": 50.0,
-                "focal_y": 45.0,
+                "focal_y": 48.0,
+                "is_banner": is_fallback_banner,
                 "method": "fallback",
                 "enable_ken_burns": False
             })
 
-        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": False}]
+        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": False}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
-                          audio_url: str, images: List[str], audio_duration: Optional[float] = None) -> str:
+                          audio_url: str, images: List[str], audio_duration: Optional[float] = None,
+                          visuals: Optional[Dict] = None) -> str:
         """
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
         La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
         durante la duración del audio del slide, con un zoom in 50% más profundo.
+        Incluye Lower Thirds flotantes dinámicos y Placa Central ("Rack Focus") generados por IA,
+        adaptándose automáticamente en 3 actos (>8.5s) o modo flash directo (<=8.5s).
         """
         if not audio_duration:
             audio_duration = self.estimate_audio_duration(text)
+
+        if not visuals or not isinstance(visuals, dict) or not visuals.get('placa'):
+            visuals = self.generate_default_visuals(title, text)
+
+        total_photos = len(images) if images else 1
+        photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
 
         template_str = """<!DOCTYPE html>
 <html lang="es">
@@ -413,9 +725,16 @@ class SlideGeneratorAgent:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,500;0,700;0,800;0,900;1,600&display=swap" rel="stylesheet">
     <style>
         :root {
             --slide-audio-duration: {{ (audio_duration | round(1)) if audio_duration else 36 }}s;
+            --slide-photo-duration: {{ (photo_duration | round(1)) if photo_duration else 15 }}s;
+            --color-primary: #003399;
+            --color-primary-light: #0055ff;
+            --color-accent-sky: #38bdf8;
         }
 
         * {
@@ -429,6 +748,8 @@ class SlideGeneratorAgent:
             height: 100%;
             overflow: hidden;
             background-color: #000000;
+            font-family: 'Century Gothic', 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
 
         .fullscreen-container {
@@ -480,8 +801,30 @@ class SlideGeneratorAgent:
             width: 100%;
             height: 100%;
             object-fit: cover;
+            image-rendering: high-quality;
+            image-rendering: -webkit-optimize-contrast;
+            backface-visibility: hidden;
+            transform: translateZ(0);
             will-change: transform;
-            animation: kenBurnsZoom var(--slide-audio-duration, 36s) ease-in-out infinite;
+            animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
+        }
+
+        /* BANNERS / AFICHES */
+        .photo-slide.is-banner .photo-main {
+            object-fit: contain !important;
+            transform-origin: 50% 50% !important;
+            animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-out forwards !important;
+        }
+
+        @keyframes kenBurnsBanner {
+            0% { transform: scale(0.95); }
+            100% { transform: scale(1.0); }
+        }
+
+        @keyframes kenBurnsPhoto {
+            0% { transform: scale(1.0); }
+            50% { transform: scale(1.27); }
+            100% { transform: scale(1.0); }
         }
 
         /* Desactivar Ken Burns para imágenes de baja resolución */
@@ -490,7 +833,7 @@ class SlideGeneratorAgent:
         }
 
         /*
-           Animación Ken Burns adaptada a la duración exacta del audio:
+           Animación Ken Burns adaptada a la duración exacta del audio
            Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
            durante el tiempo de reproducción del audio.
            - Zoom In 50% más profundo: scale(1.0) -> scale(1.27) (aumento de delta de +18% a +27%)
@@ -498,34 +841,294 @@ class SlideGeneratorAgent:
            - Ciclo 2: 50% a 75% (Zoom In) -> 75% a 100% (Zoom Out)
         */
         @keyframes kenBurnsZoom {
-            0% {
-                transform: scale(1.0);
-            }
-            25% {
-                transform: scale(1.27);
-            }
-            50% {
-                transform: scale(1.0);
-            }
-            75% {
-                transform: scale(1.27);
-            }
-            100% {
-                transform: scale(1.0);
-            }
+            0% { transform: scale(1.0); }
+            25% { transform: scale(1.27); }
+            50% { transform: scale(1.0); }
+            75% { transform: scale(1.27); }
+            100% { transform: scale(1.0); }
+        }
+
+        /* ==========================================================================
+           RACK FOCUS LAYER (Desenfoque cinemático sobre la imagen sin frenar Ken Burns)
+           ========================================================================== */
+        .rack-focus-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            pointer-events: none;
+            opacity: 0;
+            background: rgba(3, 7, 18, 0);
+            backdrop-filter: blur(0px);
+            -webkit-backdrop-filter: blur(0px);
+            transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        -webkit-backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        background 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, backdrop-filter, background;
+        }
+
+        .rack-focus-layer.active {
+            opacity: 1;
+            background: rgba(4, 9, 22, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+
+        /* ==========================================================================
+           PLACA CENTRAL DE IMPACTO (Acto 2: Citas, Cifras o Síntesis)
+           ========================================================================== */
+        .central-card {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.94);
+            max-width: 84%;
+            width: auto;
+            min-width: 280px;
+            z-index: 12;
+            opacity: 0;
+            pointer-events: none;
+            background: rgba(8, 14, 30, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 85, 255, 0.35);
+            border-radius: 18px;
+            padding: 24px 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 51, 153, 0.35);
+            text-align: center;
+            transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+
+        .central-card.visible-stage {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1.0);
+        }
+
+        .card-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card-kicker {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.7rem, 1.4vw, 0.85rem);
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .card-quote-icon {
+            font-size: clamp(2.5rem, 5.5vw, 3.8rem);
+            line-height: 0.7;
+            color: var(--color-primary-light);
+            margin-bottom: 8px;
+            font-family: Georgia, serif;
+            text-shadow: 0 2px 14px rgba(0, 85, 255, 0.6);
+        }
+
+        .card-quote-text {
+            color: #ffffff;
+            font-size: clamp(1rem, 2.4vw, 1.55rem);
+            font-weight: 600;
+            font-style: italic;
+            line-height: 1.35;
+            margin-bottom: 12px;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+        }
+
+        .card-author-line {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.75rem, 1.6vw, 0.95rem);
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .card-big-stat {
+            color: #ffffff;
+            font-size: clamp(2.2rem, 5.5vw, 4.2rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            line-height: 1.05;
+            margin-bottom: 10px;
+            text-shadow: 0 4px 20px rgba(0, 85, 255, 0.7);
+        }
+
+        .card-stat-bajada, .card-summary-text, .card-key-item {
+            color: rgba(255, 255, 255, 0.94);
+            font-size: clamp(0.9rem, 2vw, 1.3rem);
+            line-height: 1.35;
+            font-weight: 600;
+        }
+
+        .card-summary-text {
+            font-size: clamp(1rem, 2.3vw, 1.5rem);
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        /* ==========================================================================
+           LOWER THIRD FLOTANTE (Acto 1 & 3: Apertura y Remate)
+           ========================================================================== */
+        .floating-lower-third {
+            position: absolute;
+            bottom: 5.5%;
+            left: 4.5%;
+            max-width: 88%;
+            min-width: 260px;
+            z-index: 10;
+            background: rgba(8, 14, 28, 0.90);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-left: 4px solid var(--color-primary);
+            border-radius: 12px;
+            padding: 10px 16px 8px 16px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 51, 153, 0.35);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+
+        .floating-lower-third.hidden-stage {
+            opacity: 0;
+            transform: translateY(14px) scale(0.97);
+            pointer-events: none;
+        }
+
+        .lt-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .lt-badge {
+            display: inline-flex;
+            align-items: center;
+            background: var(--color-primary);
+            color: #ffffff;
+            font-size: clamp(0.65rem, 1.2vw, 0.78rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 51, 153, 0.45);
+        }
+
+        .lt-brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: clamp(0.6rem, 1.1vw, 0.72rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+
+        .lt-live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            animation: pulseDot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .lt-headline {
+            color: #ffffff;
+            font-size: clamp(0.9rem, 2.2vw, 1.35rem);
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+            transition: opacity 0.35s ease;
+        }
+
+        .lt-progress-track {
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .lt-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+            transition: width 0.1s linear;
         }
     </style>
 </head>
 <body>
     <div class="fullscreen-container" id="slideshowContainer">
         {% for img in images %}
-        <div class="photo-slide {% if loop.first %}active{% endif %}">
+        <div class="photo-slide {% if loop.first %}active{% endif %} {% if img.is_banner %}is-banner{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
             <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main{% if not (img.enable_ken_burns is defined and img.enable_ken_burns) %} no-ken-burns{% endif %}"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
                  onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
         {% endfor %}
+    </div>
+
+    <!-- CAPA RACK FOCUS -->
+    <div class="rack-focus-layer" id="rackFocusLayer"></div>
+
+    <!-- PLACA CENTRAL DE IMPACTO (ACTO 2) -->
+    <div class="central-card" id="centralCard">
+        <div class="card-inner">
+            {% if visuals.tipo_placa == 'CITA' %}
+            <div class="card-quote-icon">“</div>
+            <p class="card-quote-text" id="cardDestacado">{{ visuals.placa.destacado }}</p>
+            <div class="card-author-line" id="cardBajada">— {{ visuals.placa.bajada }}</div>
+            {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-big-stat" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-key-item" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% else %}
+            <!-- RESUMEN -->
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-summary-text" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- LOWER THIRD FLOTANTE (ACTO 1 Y ACTO 3) -->
+    <div class="floating-lower-third" id="floatingLowerThird">
+        <div class="lt-header">
+            <span class="lt-badge" id="ltKicker">{{ visuals.kicker }}</span>
+            <span class="lt-brand">
+                <span class="lt-live-dot"></span>
+                SALADILLO VIVO
+            </span>
+        </div>
+        <div class="lt-content-wrap">
+            <h2 class="lt-headline" id="ltHeadline">{{ visuals.titular_apertura }}</h2>
+        </div>
+        <div class="lt-progress-track">
+            <div class="lt-progress-bar" id="ltProgressBar"></div>
+        </div>
     </div>
 
     {% if audio_url %}
@@ -536,27 +1139,93 @@ class SlideGeneratorAgent:
         (function() {
             var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
+            var rackFocus = document.getElementById('rackFocusLayer');
+            var lowerThird = document.getElementById('floatingLowerThird');
+            var ltHeadline = document.getElementById('ltHeadline');
+            var ltProgressBar = document.getElementById('ltProgressBar');
+            var centralCard = document.getElementById('centralCard');
+
+            var titularApertura = {{ visuals.titular_apertura | tojson }};
+            var remateCierre = {{ visuals.remate | tojson }};
+            var estimatedDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
+            var activeDuration = estimatedDuration;
+            var isShortMode = (activeDuration <= 8.5);
+            var currentStage = 0; // 1: Apertura, 2: Placa, 3: Remate
             var slideInterval = null;
+
+            function updateTimeline(currentTime, totalDuration) {
+                if (!totalDuration || totalDuration <= 0) return;
+                var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
+
+                if (isShortMode) {
+                    // Modo Flash Directo: Lower third permanente, sin desenfocar la foto
+                    if (ltProgressBar) {
+                        ltProgressBar.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
+                    }
+                    return;
+                }
+
+                // Modo 3 Actos (> 8.5s)
+                // Acto 1 (0% a 30%): Apertura con foto nítida y lower third inicial
+                if (ratio < 0.30) {
+                    if (currentStage !== 1) {
+                        currentStage = 1;
+                        if (rackFocus) rackFocus.classList.remove('active');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = titularApertura;
+                    }
+                    var actProgress = ratio / 0.30;
+                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+                }
+                // Acto 2 (30% a 72%): Rack Focus sobre la foto + Placa Central de Impacto
+                else if (ratio < 0.72) {
+                    if (currentStage !== 2) {
+                        currentStage = 2;
+                        if (lowerThird) lowerThird.classList.add('hidden-stage');
+                        if (rackFocus) rackFocus.classList.add('active');
+                        if (centralCard) centralCard.classList.add('visible-stage');
+                    }
+                }
+                // Acto 3 (72% a 100%): Retorno a la foto nítida + Lower third con remate final
+                else {
+                    if (currentStage !== 3) {
+                        currentStage = 3;
+                        if (rackFocus) rackFocus.classList.remove('active');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = remateCierre;
+                    }
+                    var actProgress = (ratio - 0.72) / (1.0 - 0.72);
+                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+                }
+            }
 
             function applyDuration(durSec) {
                 if (!durSec || !isFinite(durSec) || durSec <= 0) return;
-                var dur = Math.round(durSec * 10) / 10;
-                document.documentElement.style.setProperty('--slide-audio-duration', dur + 's');
+                activeDuration = Math.round(durSec * 10) / 10;
+                isShortMode = (activeDuration <= 8.5);
+                document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
-                // Si hay más de una foto, adaptar la velocidad de rotación proporcionalmente al audio
+                // En slides con múltiples fotos, adecuar el tiempo de cada foto proporcionalmente
                 if (slides && slides.length > 1) {
+                    var photoDur = Math.round((activeDuration / slides.length) * 10) / 10;
+                    document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
+
                     if (slideInterval) clearInterval(slideInterval);
-                    var durationPerSlideMs = Math.max(4000, Math.round((dur / slides.length) * 1000));
+                    var durationPerSlideMs = Math.round(photoDur * 1000);
                     var currentIndex = 0;
                     slideInterval = setInterval(function() {
                         slides[currentIndex].classList.remove('active');
                         currentIndex = (currentIndex + 1) % slides.length;
                         slides[currentIndex].classList.add('active');
                     }, durationPerSlideMs);
+                } else {
+                    document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
                 }
             }
 
-            // 1. Escuchar metadata del audio embebido
+            // 1. Escuchar metadata y progreso del audio embebido
             if (audio) {
                 var syncFromAudio = function() {
                     if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
@@ -569,6 +1238,29 @@ class SlideGeneratorAgent:
                 if (audio.readyState >= 1) {
                     syncFromAudio();
                 }
+
+                audio.addEventListener('timeupdate', function() {
+                    var total = (audio.duration && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : activeDuration;
+                    updateTimeline(audio.currentTime, total);
+                });
+
+                function rafLoop() {
+                    if (!audio.paused && audio.duration > 0) {
+                        updateTimeline(audio.currentTime, audio.duration);
+                    }
+                    requestAnimationFrame(rafLoop);
+                }
+                requestAnimationFrame(rafLoop);
+            } else {
+                // Reloj de respaldo si el slide no cuenta con pista de audio cargada
+                var startTime = Date.now();
+                var fallbackInterval = setInterval(function() {
+                    var elapsed = (Date.now() - startTime) / 1000;
+                    if (elapsed >= activeDuration) {
+                        clearInterval(fallbackInterval);
+                    }
+                    updateTimeline(elapsed, activeDuration);
+                }, 60);
             }
 
             // 2. Escuchar postMessage enviado desde el reproductor padre (VideoSection / NewsSlidePlayer)
@@ -580,14 +1272,15 @@ class SlideGeneratorAgent:
                 }
             });
 
-            // Fallback para rotación si no hay audio o tarda en responder
+            // Inicialización de rotación proporcional si hay múltiples fotos
             if (slides && slides.length > 1 && !slideInterval) {
+                var initialPhotoDur = Math.round(({{ (photo_duration | round(1)) if photo_duration else 15 }}) * 1000);
                 var currentIndex = 0;
                 slideInterval = setInterval(function() {
                     slides[currentIndex].classList.remove('active');
                     currentIndex = (currentIndex + 1) % slides.length;
                     slides[currentIndex].classList.add('active');
-                }, 5500);
+                }, Math.max(2500, initialPhotoDur));
             }
         })();
     </script>
@@ -601,7 +1294,9 @@ class SlideGeneratorAgent:
                 text=text,
                 audio_url=audio_url or "",
                 images=images or [],
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                photo_duration=photo_duration,
+                visuals=visuals
             )
         else:
             # Fallback simple sin jinja2
@@ -610,9 +1305,15 @@ class SlideGeneratorAgent:
             fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
             fy = first_img.get("focal_y", 45) if isinstance(first_img, dict) else 45
             dur_str = str(round(audio_duration, 1) if audio_duration else 36)
+            photo_dur_str = str(round(photo_duration, 1) if photo_duration else 15)
             html = template_str.replace("{{ title }}", title).replace("{{ text }}", text).replace("{{ audio_url }}", audio_url or "")
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
+            html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
+            html = html.replace("{{ visuals.titular_apertura | tojson }}", json.dumps(visuals.get("titular_apertura", title)))
+            html = html.replace("{{ visuals.remate | tojson }}", json.dumps(visuals.get("remate", "Más detalles en saladillovivo.com.ar")))
+            html = html.replace("{{ visuals.kicker }}", visuals.get("kicker", "SALADILLO VIVO"))
+            html = html.replace("{{ visuals.titular_apertura }}", visuals.get("titular_apertura", title))
             return html
 
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:
@@ -669,7 +1370,8 @@ class SlideGeneratorAgent:
 
     def process_article_slide(self, article_id: Union[int, str], title: str, text: str,
                               audio_url: str = "", image_urls: Optional[List[str]] = None,
-                              audio_duration: Optional[float] = None) -> Optional[str]:
+                              audio_duration: Optional[float] = None,
+                              visuals: Optional[Dict] = None) -> Optional[str]:
         """
         Procesa el ciclo completo para un artículo:
         1. Optimización de imágenes
@@ -689,7 +1391,8 @@ class SlideGeneratorAgent:
                 text=text,
                 audio_url=audio_url or "",
                 images=images,
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                visuals=visuals
             )
 
             filename = self.generate_slide_filename(article_id, title)

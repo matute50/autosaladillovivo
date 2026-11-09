@@ -5,6 +5,7 @@ import Image from 'next/image';
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Volume2, RotateCcw } from 'lucide-react';
 import { Article } from '@/lib/types';
+import { getHighResolutionImageUrl } from '@/lib/utils';
 
 export default function NoticiaClient({ article }: { article: Article }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -107,7 +108,7 @@ export default function NoticiaClient({ article }: { article: Article }) {
     return `${mediaUrl}${cleanUrl.startsWith('/') ? '' : '/'}${cleanUrl}`;
   };
 
-  const finalImageUrl = getSafeImageUrl(article.imageUrl);
+  const finalImageUrl = getHighResolutionImageUrl(article.imageUrl || (article as any).image_url);
 
   return (
     <main className="container mx-auto max-w-4xl px-4 py-8">

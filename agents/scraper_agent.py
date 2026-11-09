@@ -436,6 +436,11 @@ def deduplicate_batch(articles):
                 if cand_text_len > chosen_text_len + 200:
                     chosen['text'] = art['text']
                     chosen['original_text'] = art['text']
+                # Enriquecer también imagen lógica y galería (merge con remoto)
+                if 'default-og-image' in chosen.get('image_url', '') and 'default-og-image' not in art.get('image_url', ''):
+                    chosen['image_url'] = art['image_url']
+                if len(art.get('images_urls', [])) > len(chosen.get('images_urls', [])):
+                    chosen['images_urls'] = art['images_urls']
             unique_articles.append(chosen)
             print(f"  [Deduplicación] Título duplicado: conservado artículo CON imagen ({chosen['source_name']}) y descartados {discarded_in_group} sin imagen")
 
@@ -580,6 +585,33 @@ class ArticleContentExtractor(HTMLParser):
             self.current_paragraph.append(cleaned.strip())
 
 
+def normalize_image_url(raw_url, base_url=""):
+    """
+    Normaliza una URL de imagen a su máxima resolución original:
+    - Resuelve URLs relativas con base_url.
+    - Elimina sufijos de recorte automáticos de WordPress (ej: -80x80, -300x200, -768x... -> versión original).
+    - Remueve parámetros restrictivos de resize/fit de Jetpack/Photon.
+    """
+    if not raw_url or not isinstance(raw_url, str):
+        return None
+    clean = raw_url.replace('&#038;', '&').replace('&amp;', '&').strip()
+    if clean.startswith(('data:', 'blob:')):
+        return None
+    if base_url:
+        clean = urljoin(base_url, clean)
+
+    # 1. Quitar sufijo de dimensiones de WordPress: imagen-80x80.webp -> imagen.webp
+    clean = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', clean, flags=re.I)
+
+    # 2. Limpiar query params de resize/fit forzados en Jetpack/Photon
+    if '?' in clean:
+        base_part, query_part = clean.split('?', 1)
+        params = [p for p in query_part.split('&') if not p.lower().startswith(('resize=', 'fit=', 'w=', 'h=', 'strip='))]
+        clean = base_part + ('?' + '&'.join(params) if params else '')
+
+    return clean
+
+
 class ScraperAgent:
     """
     Agente 1: Responsable exclusivo de extraer noticias frescas desde la web local.
@@ -629,6 +661,125 @@ class ScraperAgent:
         except Exception:
             pass
         return parser.links
+
+    def extract_gallery_images(self, html, base_url, og_image=None):
+        """
+        Extrae todas las imágenes de la noticia garantizando MÁXIMA RESOLUCIÓN ORIGINAL:
+        - Aísla estrictamente el cuerpo del artículo descartando sidemenus, breaking news, widgets y banners.
+        - Prioriza la imagen destacada principal de WordPress (wp-post-image, fetchpriority).
+        - Desescala y normaliza URLs de WordPress eliminando sufijos de recorte automáticos (-80x80, -300x200, etc.).
+        - Deduplica conservando siempre la versión Full HD.
+        """
+        if not html:
+            norm_og = normalize_image_url(og_image, base_url) if og_image else None
+            return [norm_og] if norm_og else []
+
+        images = []
+        seen_keys = set()
+
+        def add_candidate(img_candidate):
+            norm_url = normalize_image_url(img_candidate, base_url)
+            if not norm_url or not isinstance(norm_url, str):
+                return
+            lower = norm_url.lower()
+
+            # Descartar logos, iconos, avatares, banners, pixels, widgets sociales y publicidad
+            if any(k in lower for k in [
+                'logo', 'icon', 'avatar', 'gravatar', 'banner', 'pixel', 'advert',
+                'publicidad', 'sponsor', 'theme', 'emoji', 'button', 'mobile.png',
+                'empty.png', 'transparente', '.svg', 'facebook', 'twitter', 'instagram',
+                'whatsapp', 'share', 'jeg-empty', 'pinterest', 'linkedin'
+            ]):
+                return
+
+            # Descartar miniaturas explícitas que no se hayan podido desescalar
+            if re.search(r'-(?:80x80|100x100|150x150)\.(?:webp|jpg|jpeg|png)', lower):
+                return
+
+            # Validar que la ruta del recurso termine en formato de imagen admitido
+            parsed_path = urlparse(norm_url).path.lower()
+            if not any(parsed_path.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                return
+
+            # Clave de deduplicación basada en la URL base sin query
+            clean_key = lower.split('?')[0]
+            if clean_key not in seen_keys:
+                seen_keys.add(clean_key)
+                images.append(norm_url)
+
+        # 1. Limpieza inicial: remover bloques ruidosos globales (header, footer, nav, aside, sidemenu)
+        cleaned_html = re.sub(r'<(?:header|footer|aside|nav)[^>]*>.*?</(?:header|footer|aside|nav)>', '', html, flags=re.DOTALL | re.I)
+        cleaned_html = re.sub(r'<div[^>]*class=[\x22\x27][^\x22\x27]*(?:sidemenu|recent-post|related-post|widget_shopping|td-related-row|jnews_related_post|related-posts|comments|post-comments)[^\x22\x27]*[\x22\x27].*?</div>', '', cleaned_html, flags=re.DOTALL | re.I)
+
+        # 2. Aislar el contenedor del artículo buscando article o contenedores WordPress típicos
+        scoped_html = None
+        art_match = re.search(r'<article[^>]*>(.*?)</article>', cleaned_html, re.DOTALL | re.I)
+        if art_match:
+            scoped_html = art_match.group(1)
+        else:
+            container_match = re.search(r'(<div[^>]*class=[\x22\x27][^\x22\x27]*(?:blog-single|single-post|post-\d+|blog-content|entry-content|td-post-content|post-content)[^\x22\x27]*[\x22\x27].*?)(?:<footer|<div[^>]*class=[\x22\x27][^\x22\x27]*(?:related-post|recent-post|comments)|$)', cleaned_html, re.DOTALL | re.I)
+            if container_match:
+                scoped_html = container_match.group(1)
+            else:
+                scoped_html = cleaned_html
+
+        # 3. Prioridad 1: Buscar la imagen destacada principal de WordPress (wp-post-image o fetchpriority)
+        featured_image = None
+        for img_tag in re.findall(r'<img\s+[^>]+>', scoped_html, re.I):
+            attrs_lower = img_tag.lower()
+            if any(k in attrs_lower for k in ['gravatar', 'avatar', '80x80', '150x150', 'logo', 'icon', 'advert']):
+                continue
+            if any(k in attrs_lower for k in ['wp-post-image', 'fetchpriority', 'attachment-post-thumbnail', 'attachment-large', 'attachment-full']):
+                src_m = re.search(r'(?:data-large-file|data-orig-file|data-full-url|data-img-url|data-src|src)=[\x22\x27]([^\x22\x27]+)[\x22\x27]', img_tag, re.I)
+                if src_m:
+                    norm = normalize_image_url(src_m.group(1), base_url)
+                    if norm:
+                        featured_image = norm
+                        break
+
+        if featured_image:
+            add_candidate(featured_image)
+        elif og_image:
+            add_candidate(normalize_image_url(og_image, base_url))
+
+        # 4. Extraer enlaces directos a imágenes (típicos de galerías lightbox)
+        for a_match in re.finditer(r'<a\s+[^>]*href=[\x22\x27](https?://[^\x22\x27]+\.(?:jpg|jpeg|png|webp)(?:\?[^\x22\x27]*)?)[\x22\x27]', scoped_html, re.I):
+            add_candidate(a_match.group(1))
+
+        # 5. Extraer imágenes dentro de etiquetas <img> del cuerpo
+        for img_match in re.finditer(r'<img\s+([^>]+)>', scoped_html, re.I):
+            attrs = img_match.group(1)
+
+            # Descartar miniaturas explícitas
+            if any(k in attrs.lower() for k in ['80x80', '150x150', 'avatar', 'gravatar', 'tnews_80x80']):
+                continue
+
+            # Si posee srcset, extraer la de mayor ancho (w)
+            srcset_match = re.search(r'srcset=[\x22\x27]([^\x22\x27]+)[\x22\x27]', attrs, re.I)
+            if srcset_match:
+                parts = [p.strip().split() for p in srcset_match.group(1).split(',') if p.strip()]
+                candidates = []
+                for p in parts:
+                    if len(p) >= 2 and p[1].endswith('w'):
+                        try:
+                            candidates.append((int(p[1][:-1]), p[0]))
+                        except ValueError:
+                            pass
+                    elif len(p) >= 1:
+                        candidates.append((0, p[0]))
+                if candidates:
+                    candidates.sort(reverse=True, key=lambda x: x[0])
+                    add_candidate(candidates[0][1])
+                    continue
+
+            # Atributos de alta resolución y lazy loading
+            for attr in ['data-orig-file', 'data-large-file', 'data-full-url', 'data-img-url', 'data-src', 'data-lazy-src', 'src']:
+                attr_match = re.search(rf'{attr}=[\x22\x27]([^\x22\x27]+)[\x22\x27]', attrs, re.I)
+                if attr_match and not attr_match.group(1).startswith('data:'):
+                    add_candidate(attr_match.group(1))
+                    break
+
+        return images
 
     def parse_article(self, url, source_name, category='Local'):
         """Extrae el contenido completo y metadatos de un artículo con validación editorial."""
@@ -686,7 +837,11 @@ class ScraperAgent:
             return None
 
         description = parser.meta_description or (parser.paragraphs[0] if parser.paragraphs else title)
-        image_url = parser.meta_og_image or (parser.images[0] if parser.images else 'https://saladillovivo.vercel.app/default-og-image.png')
+
+        # Extracción completa de fotos de la noticia y galerías garantizando Full HD
+        gallery_images = self.extract_gallery_images(html, url, parser.meta_og_image)
+        raw_img = gallery_images[0] if gallery_images else (parser.meta_og_image or 'https://saladillovivo.vercel.app/default-og-image.png')
+        image_url = normalize_image_url(raw_img, url) or 'https://saladillovivo.vercel.app/default-og-image.png'
 
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
 
@@ -698,6 +853,7 @@ class ScraperAgent:
             'description': description[:300],
             'original_description': description[:300],
             'image_url': image_url,
+            'images_urls': gallery_images,
             'source_url': url,
             'source_name': source_name,
             'categoria': category,

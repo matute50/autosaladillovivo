@@ -44,6 +44,8 @@ class PublisherAgent:
 
         now_iso = datetime.now().isoformat()
         img = image_url or 'https://saladillovivo.vercel.app/default-og-image.png'
+        if img and isinstance(img, str):
+            img = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', img, flags=re.I)
 
         payload = {
             'is_published': True if immediate else False,
@@ -51,6 +53,7 @@ class PublisherAgent:
             'published_at': now_iso,
             'publish_at': now_iso,
             'updatedAt': now_iso,
+            'image_url': img,
             'miniatura_url': img,
             'og_image_url': img
         }

@@ -321,7 +321,30 @@ class OrchestratorAgent:
                 title = art.get('titulo_ia') or art.get('title')
                 text = art.get('contenido_ia') or art.get('text')
                 audio_url = art.get('audio_url') or ''
-                image_urls = [art.get('image_url')] if art.get('image_url') else []
+                raw_gallery = art.get('images_urls')
+                if isinstance(raw_gallery, list) and len(raw_gallery) > 0:
+                    image_urls = [u for u in raw_gallery if u and isinstance(u, str) and u.startswith('http')]
+                elif isinstance(raw_gallery, str) and raw_gallery.startswith('['):
+                    try:
+                        import json
+                        parsed_imgs = json.loads(raw_gallery)
+                        image_urls = [u for u in parsed_imgs if u and isinstance(u, str) and u.startswith('http')]
+                    except Exception:
+                        image_urls = []
+                else:
+                    image_urls = []
+
+                if not image_urls and art.get('image_url'):
+                    image_urls = [art.get('image_url')]
+
+                # Garantizar que todas las URLs de imágenes se pasen al slide en máxima resolución Full HD
+                clean_hd_gallery = []
+                for u in image_urls:
+                    if u and isinstance(u, str):
+                        norm_u = re.sub(r'-\d+x\d+(\.(?:webp|jpg|jpeg|png))(?:\?.*)?$', r'\1', u, flags=re.I)
+                        if norm_u not in clean_hd_gallery:
+                            clean_hd_gallery.append(norm_u)
+                image_urls = clean_hd_gallery or image_urls
 
                 slide_url = self.slide_agent.process_article_slide(
                     article_id=art_id,
@@ -329,7 +352,8 @@ class OrchestratorAgent:
                     text=text,
                     audio_url=audio_url,
                     image_urls=image_urls,
-                    audio_duration=art.get('audio_duration')
+                    audio_duration=art.get('audio_duration'),
+                    visuals=art.get('slide_visuals')
                 )
                 if slide_url:
                     art['url_slide'] = slide_url
