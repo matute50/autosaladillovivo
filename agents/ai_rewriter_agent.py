@@ -135,13 +135,39 @@ DIRECTIVAS DE REDACCIÓN PARA NOTICIERO RADIAL Y LOCUCIÓN GOOGLE TTS:
    - Meta descripción SEO concisa de máximo 155 caracteres.
    - 4 a 6 palabras clave locales ("Saladillo", etc.).
 
+4. ELEMENTOS VISUALES PARA SLIDE Y LOWER THIRDS DINÁMICOS:
+   Analiza el despacho y selecciona el mejor formato visual televisivo según los recursos de la noticia:
+   - "kicker": Categoría o localidad en mayúsculas (ej. "OBRAS PÚBLICAS", "SOCIEDAD", "SALADILLO", "POLICIALES", "DEPORTES").
+   - "titular_apertura": Titular telegráfico corto de alto impacto para el primer tercio del slide (máximo 8 a 10 palabras).
+   - "tipo_placa": Selecciona estrictamente uno entre:
+     * "CITA": Si la noticia contiene declaraciones de funcionarios, vecinos o protagonistas ("dijo...", "expresó...").
+     * "DATO_NUMERICO": Si contiene cifras, montos de dinero ($), porcentajes (%), cuadras de asfalto, cantidades destacadas.
+     * "PUNTOS_CLAVE": Si es agenda, evento, requisitos o cronograma (días, horarios, lugar).
+     * "RESUMEN": Si es puramente conceptual o descriptiva sin cifras ni citas.
+   - "placa":
+     * "titulo": Contexto corto del gráfico (ej. "DECLARACIÓN", "PRESUPUESTO ESTIMADO", "DATOS CLAVE").
+     * "destacado": Elemento de máximo impacto. Si es CITA, la frase textual entre comillas. Si es DATO_NUMERICO, el número grande (ej. "$150 MILLONES", "12 CUADRAS"). Si es RESUMEN o PUNTOS_CLAVE, la síntesis principal.
+     * "bajada": Quién lo dijo con cargo, o la explicación del número (ej. "José Luis Salomón | Intendente", "Inversión municipal con fondos propios").
+   - "remate": Frase corta de cierre para el último tercio del slide (máximo 8 a 10 palabras, ej. "Trabajos previstos para antes de fin de mes").
+
 RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
 {{
   "es_local_regional": true,
   "titulo_optimizado": "Titular radial corto y directo en presente (máximo 12 palabras)",
   "contenido_optimizado": "Texto radial breve de 80 a 110 palabras en voz activa...",
   "meta_description": "Resumen conciso para SEO...",
-  "palabras_clave": ["Saladillo", "tema1", "tema2"]
+  "palabras_clave": ["Saladillo", "tema1", "tema2"],
+  "slide_visuals": {{
+    "kicker": "CATEGORÍA O LOCALIDAD",
+    "titular_apertura": "Titular corto para apertura",
+    "tipo_placa": "CITA | DATO_NUMERICO | PUNTOS_CLAVE | RESUMEN",
+    "placa": {{
+      "titulo": "Contexto del dato",
+      "destacado": "Texto destacado o cifra grande",
+      "bajada": "Autor o explicación de la cifra"
+    }},
+    "remate": "Frase de cierre para el remate final"
+  }}
 }}"""
 
     def _call_glm(self, prompt, provider):
@@ -260,6 +286,87 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                     pass
         return None
 
+    def build_heuristic_slide_visuals(self, title, content):
+        """
+        Genera metadatos visuales heurísticos para lower thirds y placa central
+        cuando la IA no los entrega o en modo fallback.
+        """
+        text_lower = f"{title} {content}".lower()
+
+        # Determinar Kicker / Categoría
+        if any(k in text_lower for k in ['obras', 'paviment', 'asfalto', 'cordón', 'vial', 'iluminaci']):
+            kicker = "OBRAS PÚBLICAS"
+        elif any(k in text_lower for k in ['polic', 'comisar', 'detuv', 'rob', 'aprehend', 'allanamiento', 'delit']):
+            kicker = "POLICIALES"
+        elif any(k in text_lower for k in ['salud', 'hospital', 'médic', 'caps', 'enferm', 'vacun']):
+            kicker = "SALUD"
+        elif any(k in text_lower for k in ['deport', 'fútbol', 'básquet', 'campeón', 'ciclism', 'automovilism']):
+            kicker = "DEPORTES"
+        elif any(k in text_lower for k in ['cultur', 'teatro', 'músic', 'cine', 'taller', 'fiesta']):
+            kicker = "CULTURA"
+        elif any(k in text_lower for k in ['educac', 'escuel', 'alumn', 'docent', 'jardín']):
+            kicker = "EDUCACIÓN"
+        elif any(k in text_lower for k in ['agro', 'rural', 'camp', 'cosech', 'ganad']):
+            kicker = "AGRO Y PRODUCCIÓN"
+        elif any(k in text_lower for k in ['municip', 'intendente', 'concej', 'salomón']):
+            kicker = "MUNICIPIO"
+        else:
+            kicker = "SALADILLO VIVO"
+
+        # Titular apertura (máx 10 palabras)
+        clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
+        words = clean_title.split()
+        titular_apertura = " ".join(words[:10]).rstrip(' ,.:;')
+
+        # Buscar si hay citas textuales
+        quote_match = re.search(r'["“]([^"”]{15,120})["”]', content)
+        # Buscar si hay cifras o números de impacto
+        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones|mil)?|\d+\s*(?:millones|cuadras|viviendas|hectáreas|alumnos|casos|efectivos|%))', content, re.IGNORECASE)
+
+        if quote_match:
+            tipo_placa = "CITA"
+            placa = {
+                "titulo": "DECLARACIÓN",
+                "destacado": f'"{quote_match.group(1).strip()}"',
+                "bajada": "Testimonio en Saladillo Vivo"
+            }
+        elif stat_match:
+            tipo_placa = "DATO_NUMERICO"
+            placa = {
+                "titulo": "CIFRA DESTACADA",
+                "destacado": stat_match.group(1).upper().strip(),
+                "bajada": "Dato central del informe periodístico"
+            }
+        else:
+            tipo_placa = "RESUMEN"
+            # Tomar una oración representativa del cuerpo
+            sentences = [s.strip() for s in re.split(r'[\.\n]+', content) if len(s.strip()) > 25]
+            summary_text = sentences[0] if sentences else titular_apertura
+            if len(summary_text) > 85:
+                summary_text = summary_text[:82].rsplit(' ', 1)[0] + '...'
+            placa = {
+                "titulo": "SÍNTESIS",
+                "destacado": summary_text,
+                "bajada": "Cobertura especial Saladillo Vivo"
+            }
+
+        # Remate de cierre
+        remate = "Más detalles en saladillovivo.com.ar"
+        sentences = [s.strip() for s in re.split(r'[\.\n]+', content) if len(s.strip()) > 20]
+        if len(sentences) >= 2:
+            last_s = sentences[-1]
+            last_words = last_s.split()
+            if 3 <= len(last_words) <= 12:
+                remate = " ".join(last_words).rstrip(' ,.:;')
+
+        return {
+            "kicker": kicker,
+            "titular_apertura": titular_apertura,
+            "tipo_placa": tipo_placa,
+            "placa": placa,
+            "remate": remate
+        }
+
     def local_heuristic_fallback(self, title, content):
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
@@ -295,11 +402,14 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             if w not in keywords:
                 keywords.append(w)
 
+        slide_visuals = self.build_heuristic_slide_visuals(hook_title, condensed_body)
+
         return {
             'titulo_optimizado': hook_title,
             'contenido_optimizado': condensed_body.strip(),
             'meta_description': meta_desc,
-            'palabras_clave': keywords
+            'palabras_clave': keywords,
+            'slide_visuals': slide_visuals
         }
 
     def calculate_priority_score(self, title, content, image_url=None):
@@ -418,11 +528,20 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             image_url
         )
 
+        # Garantizar presencia y completitud de slide_visuals
+        slide_visuals = ai_result.get('slide_visuals')
+        if not slide_visuals or not isinstance(slide_visuals, dict) or not slide_visuals.get('placa'):
+            slide_visuals = self.build_heuristic_slide_visuals(
+                ai_result.get('titulo_optimizado', title),
+                ai_result.get('contenido_optimizado', content)
+            )
+
         return {
             'titulo_ia': ai_result.get('titulo_optimizado', title),
             'contenido_ia': ai_result.get('contenido_optimizado', content),
             'meta_description': meta_desc,
             'meta_keywords': ai_result.get('palabras_clave', ['Saladillo']),
+            'slide_visuals': slide_visuals,
             'featureStatus': feature_status,
             'ai_provider': used_provider,
             'modified_at': datetime.now().isoformat()

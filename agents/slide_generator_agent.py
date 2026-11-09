@@ -18,6 +18,7 @@ import os
 import io
 import sys
 import re
+import json
 import time
 import hashlib
 import logging
@@ -92,6 +93,82 @@ class SlideGeneratorAgent:
         words = len(text.strip().split()) if text else 0
         duration = (words / 2.08) + 1.0 + 3.0
         return max(20.0, min(round(duration, 1), 120.0))
+
+    def generate_default_visuals(self, title: str, text: str) -> Dict:
+        """
+        Genera metadatos estructurados para lower thirds y placa central TV-Grade
+        en caso de que no hayan sido provistos por el modelo de IA.
+        """
+        t_lower = f"{title} {text}".lower()
+
+        # Determinar Kicker / Categoría según temática local
+        if any(k in t_lower for k in ['obras', 'paviment', 'asfalto', 'cordón', 'vial', 'iluminaci', 'bacheo']):
+            kicker = "OBRAS PÚBLICAS"
+        elif any(k in t_lower for k in ['polic', 'comisar', 'detuv', 'rob', 'aprehend', 'allanamiento', 'delit']):
+            kicker = "POLICIALES"
+        elif any(k in t_lower for k in ['salud', 'hospital', 'médic', 'caps', 'enferm', 'vacun']):
+            kicker = "SALUD"
+        elif any(k in t_lower for k in ['deport', 'fútbol', 'básquet', 'campeón', 'ciclism', 'automovilism']):
+            kicker = "DEPORTES"
+        elif any(k in t_lower for k in ['cultur', 'teatro', 'músic', 'cine', 'taller', 'fiesta']):
+            kicker = "CULTURA"
+        elif any(k in t_lower for k in ['educac', 'escuel', 'alumn', 'docent', 'jardín']):
+            kicker = "EDUCACIÓN"
+        elif any(k in t_lower for k in ['agro', 'rural', 'camp', 'cosech', 'ganad']):
+            kicker = "AGRO Y PRODUCCIÓN"
+        elif any(k in t_lower for k in ['municip', 'intendente', 'concej', 'salomón']):
+            kicker = "MUNICIPIO"
+        else:
+            kicker = "SALADILLO VIVO"
+
+        clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
+        words = clean_title.split()
+        titular_apertura = " ".join(words[:10]).rstrip(' ,.:;')
+
+        quote_match = re.search(r'["“]([^"”]{15,120})["”]', text)
+        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones|mil)?|\d+\s*(?:millones|cuadras|viviendas|hectáreas|alumnos|casos|efectivos|%))', text, re.IGNORECASE)
+
+        if quote_match:
+            tipo_placa = "CITA"
+            placa = {
+                "titulo": "DECLARACIÓN",
+                "destacado": f'"{quote_match.group(1).strip()}"',
+                "bajada": "Testimonio en Saladillo Vivo"
+            }
+        elif stat_match:
+            tipo_placa = "DATO_NUMERICO"
+            placa = {
+                "titulo": "CIFRA DESTACADA",
+                "destacado": stat_match.group(1).upper().strip(),
+                "bajada": "Dato central del informe periodístico"
+            }
+        else:
+            tipo_placa = "RESUMEN"
+            sentences = [s.strip() for s in re.split(r'[\.\n]+', text) if len(s.strip()) > 25]
+            summary_text = sentences[0] if sentences else titular_apertura
+            if len(summary_text) > 85:
+                summary_text = summary_text[:82].rsplit(' ', 1)[0] + '...'
+            placa = {
+                "titulo": "SÍNTESIS",
+                "destacado": summary_text,
+                "bajada": "Cobertura especial Saladillo Vivo"
+            }
+
+        remate = "Más detalles en saladillovivo.com.ar"
+        sentences = [s.strip() for s in re.split(r'[\.\n]+', text) if len(s.strip()) > 20]
+        if len(sentences) >= 2:
+            last_s = sentences[-1]
+            last_words = last_s.split()
+            if 3 <= len(last_words) <= 12:
+                remate = " ".join(last_words).rstrip(' ,.:;')
+
+        return {
+            "kicker": kicker,
+            "titular_apertura": titular_apertura,
+            "tipo_placa": tipo_placa,
+            "placa": placa,
+            "remate": remate
+        }
 
     def detect_banner_or_sign_title(self, gray, w, h):
         """
@@ -629,16 +706,20 @@ class SlideGeneratorAgent:
         return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default"}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
-                          audio_url: str, images: List[str], audio_duration: Optional[float] = None) -> str:
+                          audio_url: str, images: List[str], audio_duration: Optional[float] = None,
+                          visuals: Optional[Dict] = None) -> str:
         """
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
         La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
         durante la duración del audio del slide, con un zoom in 50% más profundo.
-        En slides con múltiples fotos (galería), se adecua el tiempo de visualización de cada foto
-        de acuerdo al tiempo total del slide determinado por la duración del audio generado.
+        Incluye Lower Thirds flotantes dinámicos y Placa Central ("Rack Focus") generados por IA,
+        adaptándose automáticamente en 3 actos (>8.5s) o modo flash directo (<=8.5s).
         """
         if not audio_duration:
             audio_duration = self.estimate_audio_duration(text)
+
+        if not visuals or not isinstance(visuals, dict) or not visuals.get('placa'):
+            visuals = self.generate_default_visuals(title, text)
 
         total_photos = len(images) if images else 1
         photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
@@ -649,10 +730,16 @@ class SlideGeneratorAgent:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,500;0,700;0,800;0,900;1,600&display=swap" rel="stylesheet">
     <style>
         :root {
             --slide-audio-duration: {{ (audio_duration | round(1)) if audio_duration else 36 }}s;
             --slide-photo-duration: {{ (photo_duration | round(1)) if photo_duration else 15 }}s;
+            --color-primary: #003399;
+            --color-primary-light: #0055ff;
+            --color-accent-sky: #38bdf8;
         }
 
         * {
@@ -666,6 +753,8 @@ class SlideGeneratorAgent:
             height: 100%;
             overflow: hidden;
             background-color: #000000;
+            font-family: 'Century Gothic', 'Montserrat', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
 
         .fullscreen-container {
@@ -725,12 +814,7 @@ class SlideGeneratorAgent:
             animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
-        /* 
-           BANNERS / AFICHES:
-           El banner debe mantener el 100% de su contenido visible sin recortes de texto.
-           object-fit: contain asegura que quepa íntegro.
-           La animación Ken Burns hace un zoom in suave que se detiene exactamente al 100% de pantalla (scale 1.0).
-        */
+        /* BANNERS / AFICHES */
         .photo-slide.is-banner .photo-main {
             object-fit: contain !important;
             transform-origin: 50% 50% !important;
@@ -738,56 +822,248 @@ class SlideGeneratorAgent:
         }
 
         @keyframes kenBurnsBanner {
-            0% {
-                transform: scale(0.95);
-            }
-            100% {
-                transform: scale(1.0);
-            }
+            0% { transform: scale(0.95); }
+            100% { transform: scale(1.0); }
         }
 
-        /*
-           Animación Ken Burns para múltiples fotos (galería):
-           Cada foto en pantalla realiza un acercamiento +50% más profundo (scale 1.27)
-           directo a su centro de atención durante el tiempo proporcional
-           asignado de acuerdo a la duración del audio.
-        */
         @keyframes kenBurnsPhoto {
-            0% {
-                transform: scale(1.0);
-            }
-            50% {
-                transform: scale(1.27);
-            }
-            100% {
-                transform: scale(1.0);
-            }
+            0% { transform: scale(1.0); }
+            50% { transform: scale(1.27); }
+            100% { transform: scale(1.0); }
         }
 
-        /*
-           Animación Ken Burns para foto única:
-           Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
-           durante el tiempo total de reproducción del audio.
-           - Zoom In 50% más profundo: scale(1.0) -> scale(1.27) (aumento de delta de +18% a +27%)
-           - Ciclo 1: 0% a 25% (Zoom In) -> 25% a 50% (Zoom Out)
-           - Ciclo 2: 50% a 75% (Zoom In) -> 75% a 100% (Zoom Out)
-        */
         @keyframes kenBurnsZoom {
-            0% {
-                transform: scale(1.0);
-            }
-            25% {
-                transform: scale(1.27);
-            }
-            50% {
-                transform: scale(1.0);
-            }
-            75% {
-                transform: scale(1.27);
-            }
-            100% {
-                transform: scale(1.0);
-            }
+            0% { transform: scale(1.0); }
+            25% { transform: scale(1.27); }
+            50% { transform: scale(1.0); }
+            75% { transform: scale(1.27); }
+            100% { transform: scale(1.0); }
+        }
+
+        /* ==========================================================================
+           RACK FOCUS LAYER (Desenfoque cinemático sobre la imagen sin frenar Ken Burns)
+           ========================================================================== */
+        .rack-focus-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            pointer-events: none;
+            opacity: 0;
+            background: rgba(3, 7, 18, 0);
+            backdrop-filter: blur(0px);
+            -webkit-backdrop-filter: blur(0px);
+            transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        -webkit-backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
+                        background 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, backdrop-filter, background;
+        }
+
+        .rack-focus-layer.active {
+            opacity: 1;
+            background: rgba(4, 9, 22, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+
+        /* ==========================================================================
+           PLACA CENTRAL DE IMPACTO (Acto 2: Citas, Cifras o Síntesis)
+           ========================================================================== */
+        .central-card {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.94);
+            max-width: 84%;
+            width: auto;
+            min-width: 280px;
+            z-index: 12;
+            opacity: 0;
+            pointer-events: none;
+            background: rgba(8, 14, 30, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 85, 255, 0.35);
+            border-radius: 18px;
+            padding: 24px 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 51, 153, 0.35);
+            text-align: center;
+            transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+
+        .central-card.visible-stage {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, -50%) scale(1.0);
+        }
+
+        .card-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card-kicker {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.7rem, 1.4vw, 0.85rem);
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .card-quote-icon {
+            font-size: clamp(2.5rem, 5.5vw, 3.8rem);
+            line-height: 0.7;
+            color: var(--color-primary-light);
+            margin-bottom: 8px;
+            font-family: Georgia, serif;
+            text-shadow: 0 2px 14px rgba(0, 85, 255, 0.6);
+        }
+
+        .card-quote-text {
+            color: #ffffff;
+            font-size: clamp(1rem, 2.4vw, 1.55rem);
+            font-weight: 600;
+            font-style: italic;
+            line-height: 1.35;
+            margin-bottom: 12px;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+        }
+
+        .card-author-line {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.75rem, 1.6vw, 0.95rem);
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .card-big-stat {
+            color: #ffffff;
+            font-size: clamp(2.2rem, 5.5vw, 4.2rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            line-height: 1.05;
+            margin-bottom: 10px;
+            text-shadow: 0 4px 20px rgba(0, 85, 255, 0.7);
+        }
+
+        .card-stat-bajada, .card-summary-text, .card-key-item {
+            color: rgba(255, 255, 255, 0.94);
+            font-size: clamp(0.9rem, 2vw, 1.3rem);
+            line-height: 1.35;
+            font-weight: 600;
+        }
+
+        .card-summary-text {
+            font-size: clamp(1rem, 2.3vw, 1.5rem);
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        /* ==========================================================================
+           LOWER THIRD FLOTANTE (Acto 1 & 3: Apertura y Remate)
+           ========================================================================== */
+        .floating-lower-third {
+            position: absolute;
+            bottom: 5.5%;
+            left: 4.5%;
+            max-width: 88%;
+            min-width: 260px;
+            z-index: 10;
+            background: rgba(8, 14, 28, 0.90);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-left: 4px solid var(--color-primary);
+            border-radius: 12px;
+            padding: 10px 16px 8px 16px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 51, 153, 0.35);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+
+        .floating-lower-third.hidden-stage {
+            opacity: 0;
+            transform: translateY(14px) scale(0.97);
+            pointer-events: none;
+        }
+
+        .lt-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .lt-badge {
+            display: inline-flex;
+            align-items: center;
+            background: var(--color-primary);
+            color: #ffffff;
+            font-size: clamp(0.65rem, 1.2vw, 0.78rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 51, 153, 0.45);
+        }
+
+        .lt-brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: clamp(0.6rem, 1.1vw, 0.72rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+
+        .lt-live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            animation: pulseDot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .lt-headline {
+            color: #ffffff;
+            font-size: clamp(0.9rem, 2.2vw, 1.35rem);
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+            transition: opacity 0.35s ease;
+        }
+
+        .lt-progress-track {
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .lt-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+            transition: width 0.1s linear;
         }
     </style>
 </head>
@@ -803,6 +1079,50 @@ class SlideGeneratorAgent:
         {% endfor %}
     </div>
 
+    <!-- CAPA RACK FOCUS -->
+    <div class="rack-focus-layer" id="rackFocusLayer"></div>
+
+    <!-- PLACA CENTRAL DE IMPACTO (ACTO 2) -->
+    <div class="central-card" id="centralCard">
+        <div class="card-inner">
+            {% if visuals.tipo_placa == 'CITA' %}
+            <div class="card-quote-icon">“</div>
+            <p class="card-quote-text" id="cardDestacado">{{ visuals.placa.destacado }}</p>
+            <div class="card-author-line" id="cardBajada">— {{ visuals.placa.bajada }}</div>
+            {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-big-stat" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-key-item" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% else %}
+            <!-- RESUMEN -->
+            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
+            <div class="card-summary-text" id="cardDestacado">{{ visuals.placa.destacado }}</div>
+            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- LOWER THIRD FLOTANTE (ACTO 1 Y ACTO 3) -->
+    <div class="floating-lower-third" id="floatingLowerThird">
+        <div class="lt-header">
+            <span class="lt-badge" id="ltKicker">{{ visuals.kicker }}</span>
+            <span class="lt-brand">
+                <span class="lt-live-dot"></span>
+                SALADILLO VIVO
+            </span>
+        </div>
+        <div class="lt-content-wrap">
+            <h2 class="lt-headline" id="ltHeadline">{{ visuals.titular_apertura }}</h2>
+        </div>
+        <div class="lt-progress-track">
+            <div class="lt-progress-bar" id="ltProgressBar"></div>
+        </div>
+    </div>
+
     {% if audio_url %}
     <audio id="slideAudio" src="{{ audio_url }}" preload="auto" playsinline style="display:none;"></audio>
     {% endif %}
@@ -811,16 +1131,77 @@ class SlideGeneratorAgent:
         (function() {
             var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
+            var rackFocus = document.getElementById('rackFocusLayer');
+            var lowerThird = document.getElementById('floatingLowerThird');
+            var ltHeadline = document.getElementById('ltHeadline');
+            var ltProgressBar = document.getElementById('ltProgressBar');
+            var centralCard = document.getElementById('centralCard');
+
+            var titularApertura = {{ visuals.titular_apertura | tojson }};
+            var remateCierre = {{ visuals.remate | tojson }};
+            var estimatedDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
+            var activeDuration = estimatedDuration;
+            var isShortMode = (activeDuration <= 8.5);
+            var currentStage = 0; // 1: Apertura, 2: Placa, 3: Remate
             var slideInterval = null;
+
+            function updateTimeline(currentTime, totalDuration) {
+                if (!totalDuration || totalDuration <= 0) return;
+                var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
+
+                if (isShortMode) {
+                    // Modo Flash Directo: Lower third permanente, sin desenfocar la foto
+                    if (ltProgressBar) {
+                        ltProgressBar.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
+                    }
+                    return;
+                }
+
+                // Modo 3 Actos (> 8.5s)
+                // Acto 1 (0% a 30%): Apertura con foto nítida y lower third inicial
+                if (ratio < 0.30) {
+                    if (currentStage !== 1) {
+                        currentStage = 1;
+                        if (rackFocus) rackFocus.classList.remove('active');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = titularApertura;
+                    }
+                    var actProgress = ratio / 0.30;
+                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+                }
+                // Acto 2 (30% a 72%): Rack Focus sobre la foto + Placa Central de Impacto
+                else if (ratio < 0.72) {
+                    if (currentStage !== 2) {
+                        currentStage = 2;
+                        if (lowerThird) lowerThird.classList.add('hidden-stage');
+                        if (rackFocus) rackFocus.classList.add('active');
+                        if (centralCard) centralCard.classList.add('visible-stage');
+                    }
+                }
+                // Acto 3 (72% a 100%): Retorno a la foto nítida + Lower third con remate final
+                else {
+                    if (currentStage !== 3) {
+                        currentStage = 3;
+                        if (rackFocus) rackFocus.classList.remove('active');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = remateCierre;
+                    }
+                    var actProgress = (ratio - 0.72) / (1.0 - 0.72);
+                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+                }
+            }
 
             function applyDuration(durSec) {
                 if (!durSec || !isFinite(durSec) || durSec <= 0) return;
-                var dur = Math.round(durSec * 10) / 10;
-                document.documentElement.style.setProperty('--slide-audio-duration', dur + 's');
+                activeDuration = Math.round(durSec * 10) / 10;
+                isShortMode = (activeDuration <= 8.5);
+                document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
-                // En slides con múltiples fotos, adecuar el tiempo de cada foto proporcionalmente al tiempo total del audio
+                // En slides con múltiples fotos, adecuar el tiempo de cada foto proporcionalmente
                 if (slides && slides.length > 1) {
-                    var photoDur = Math.round((dur / slides.length) * 10) / 10;
+                    var photoDur = Math.round((activeDuration / slides.length) * 10) / 10;
                     document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
 
                     if (slideInterval) clearInterval(slideInterval);
@@ -832,11 +1213,11 @@ class SlideGeneratorAgent:
                         slides[currentIndex].classList.add('active');
                     }, durationPerSlideMs);
                 } else {
-                    document.documentElement.style.setProperty('--slide-photo-duration', dur + 's');
+                    document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
                 }
             }
 
-            // 1. Escuchar metadata del audio embebido
+            // 1. Escuchar metadata y progreso del audio embebido
             if (audio) {
                 var syncFromAudio = function() {
                     if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
@@ -849,6 +1230,29 @@ class SlideGeneratorAgent:
                 if (audio.readyState >= 1) {
                     syncFromAudio();
                 }
+
+                audio.addEventListener('timeupdate', function() {
+                    var total = (audio.duration && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : activeDuration;
+                    updateTimeline(audio.currentTime, total);
+                });
+
+                function rafLoop() {
+                    if (!audio.paused && audio.duration > 0) {
+                        updateTimeline(audio.currentTime, audio.duration);
+                    }
+                    requestAnimationFrame(rafLoop);
+                }
+                requestAnimationFrame(rafLoop);
+            } else {
+                // Reloj de respaldo si el slide no cuenta con pista de audio cargada
+                var startTime = Date.now();
+                var fallbackInterval = setInterval(function() {
+                    var elapsed = (Date.now() - startTime) / 1000;
+                    if (elapsed >= activeDuration) {
+                        clearInterval(fallbackInterval);
+                    }
+                    updateTimeline(elapsed, activeDuration);
+                }, 60);
             }
 
             // 2. Escuchar postMessage enviado desde el reproductor padre (VideoSection / NewsSlidePlayer)
@@ -883,7 +1287,8 @@ class SlideGeneratorAgent:
                 audio_url=audio_url or "",
                 images=images or [],
                 audio_duration=audio_duration,
-                photo_duration=photo_duration
+                photo_duration=photo_duration,
+                visuals=visuals
             )
         else:
             # Fallback simple sin jinja2
@@ -897,6 +1302,10 @@ class SlideGeneratorAgent:
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
             html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
+            html = html.replace("{{ visuals.titular_apertura | tojson }}", json.dumps(visuals.get("titular_apertura", title)))
+            html = html.replace("{{ visuals.remate | tojson }}", json.dumps(visuals.get("remate", "Más detalles en saladillovivo.com.ar")))
+            html = html.replace("{{ visuals.kicker }}", visuals.get("kicker", "SALADILLO VIVO"))
+            html = html.replace("{{ visuals.titular_apertura }}", visuals.get("titular_apertura", title))
             return html
 
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:
@@ -953,7 +1362,8 @@ class SlideGeneratorAgent:
 
     def process_article_slide(self, article_id: Union[int, str], title: str, text: str,
                               audio_url: str = "", image_urls: Optional[List[str]] = None,
-                              audio_duration: Optional[float] = None) -> Optional[str]:
+                              audio_duration: Optional[float] = None,
+                              visuals: Optional[Dict] = None) -> Optional[str]:
         """
         Procesa el ciclo completo para un artículo:
         1. Optimización de imágenes
@@ -973,7 +1383,8 @@ class SlideGeneratorAgent:
                 text=text,
                 audio_url=audio_url or "",
                 images=images,
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                visuals=visuals
             )
 
             filename = self.generate_slide_filename(article_id, title)
