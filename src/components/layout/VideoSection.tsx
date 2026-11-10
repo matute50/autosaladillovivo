@@ -26,6 +26,7 @@ const VideoSection: React.FC = () => {
 
   const {
     currentVideo,
+    nextVideo,
     isPlaying,
     handleOnEnded,
     saveCurrentProgress,
@@ -119,19 +120,70 @@ const VideoSection: React.FC = () => {
     };
   }, [currentSlide, currentVideo?.url_slide]);
 
-  // --- SINGLE PLAYER LOGIC (v23.9) ---
+  // --- SMART SLOT SYSTEM (v18.0) STATE ---
+  const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A');
+  const [slotAVideo, setSlotAVideo] = useState<typeof currentVideo>(currentVideo);
+  const [slotBVideo, setSlotBVideo] = useState<typeof nextVideo>(nextVideo);
 
+  // Sincronización continua de Slots A/B sin desmontar nodos en el DOM
+  useEffect(() => {
+    if (!currentVideo) return;
+
+    if (activeSlot === 'A') {
+      if (slotBVideo?.id === currentVideo.id) {
+        // Swap A -> B sin corte
+        setActiveSlot('B');
+        if (nextVideo && nextVideo.id !== currentVideo.id) {
+          setSlotAVideo(nextVideo);
+        }
+      } else if (slotAVideo?.id === currentVideo.id) {
+        // Mismo slot A, asegurar que el inactivo B tenga nextVideo listo para precargar
+        if (nextVideo && slotBVideo?.id !== nextVideo.id) {
+          setSlotBVideo(nextVideo);
+        }
+      } else {
+        // Asignación directa
+        setSlotAVideo(currentVideo);
+        if (nextVideo && nextVideo.id !== currentVideo.id) {
+          setSlotBVideo(nextVideo);
+        }
+      }
+    } else {
+      // activeSlot === 'B'
+      if (slotAVideo?.id === currentVideo.id) {
+        // Swap B -> A sin corte
+        setActiveSlot('A');
+        if (nextVideo && nextVideo.id !== currentVideo.id) {
+          setSlotBVideo(nextVideo);
+        }
+      } else if (slotBVideo?.id === currentVideo.id) {
+        // Mismo slot B, asegurar que el inactivo A tenga nextVideo listo para precargar
+        if (nextVideo && slotAVideo?.id !== nextVideo.id) {
+          setSlotAVideo(nextVideo);
+        }
+      } else {
+        // Asignación directa
+        setSlotBVideo(currentVideo);
+        if (nextVideo && nextVideo.id !== currentVideo.id) {
+          setSlotAVideo(nextVideo);
+        }
+      }
+    }
+  }, [currentVideo, nextVideo, activeSlot, slotAVideo?.id, slotBVideo?.id]);
+
+  // --- AUDIO LEVELLING (v23.1) ---
   useEffect(() => {
     if (audioRef.current) {
-      // Si hay un slide de noticias activo, forzamos volumen 1 independientemente del store global
       if (isHtmlSlideActive) {
         audioRef.current.volume = 1;
         audioRef.current.muted = false;
       } else {
-        audioRef.current.volume = isMuted ? 0 : volume;
+        const extra = (currentVideo as any)?.volumen_extra || 1;
+        const targetVolume = Math.min(1, (volume || 1) * extra);
+        audioRef.current.volume = isMuted ? 0 : targetVolume;
       }
     }
-  }, [volume, isMuted, isHtmlSlideActive]);
+  }, [volume, isMuted, isHtmlSlideActive, currentVideo]);
 
 
   const [playBackgroundEarly, setPlayBackgroundEarly] = useState(false);
@@ -227,7 +279,9 @@ const VideoSection: React.FC = () => {
     if (audioUrl && audioUrl !== 'NO_AUDIO_URL') {
       if (audioRef.current) {
         audioRef.current.muted = false;
-        audioRef.current.volume = isMuted ? 0 : (volume || 1);
+        const extra = (currentVideo as any)?.volumen_extra || 1;
+        const targetVolume = Math.min(1, (volume || 1) * extra);
+        audioRef.current.volume = isMuted ? 0 : (isHtmlSlideActive ? 1 : targetVolume);
         if (audioRef.current.src !== audioUrl) {
           audioRef.current.src = audioUrl;
         }
@@ -241,7 +295,7 @@ const VideoSection: React.FC = () => {
         audioRef.current.src = "";
       }
     }
-  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume]);
+  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume, currentVideo, isHtmlSlideActive]);
 
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
@@ -492,44 +546,85 @@ const VideoSection: React.FC = () => {
               </motion.div>
             )}
 
-            {/* 3. REPRODUCTOR TRADICIONAL (YOUTUBE / HLS) */}
-            <div className="absolute inset-0 bg-black">
-              <AnimatePresence mode="wait">
-                {currentVideo?.url && !isNewsSlide && !isNewsImageAudio && (
-                  <motion.div
-                    key={currentVideo.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.75 }}
-                    className="absolute inset-0"
-                    data-player-id={currentVideo.id}
-                  >
-                    <VideoPlayer
-                      key={currentVideo.id}
-                      id={currentVideo.id}
-                      videoUrl={currentVideo.url}
-                      autoplay={isPlaying && (isContentPlaying || isInitialLoadRef.current)}
-                      muted={(!isPlaying || !isContentPlaying)}
-                      imageUrl={currentVideo.imagen}
-                      onClose={() => {
-                        if (!transitionSignaledRef.current && currentVideo?.id !== 'live-stream') {
-                          handleOnEnded(setVolume, unmute);
-                        }
-                      }}
-                      onProgress={(state) => {
-                        handleProgress(state);
-                      }}
-                      onDuration={(d) => {
-                        setCurrentDuration(d);
-                      }}
-                      startAt={currentVideo.id === lastProcessedVideoIdRef.current ? undefined : (currentVideo.novedad ? 0 : undefined)}
-                      volumen_extra={currentVideo.volumen_extra}
-                      audioUrl={currentVideo.audioSourceUrl}
-                    />
-                  </motion.div>
+            {/* 3. REPRODUCTOR TRADICIONAL - SMART SLOT SYSTEM A/B (v18.0) */}
+            <div className="absolute inset-0 bg-black overflow-hidden">
+              {/* SLOT A */}
+              <div
+                className={cn(
+                  "absolute inset-0 transition-opacity duration-700 ease-in-out",
+                  activeSlot === 'A'
+                    ? "z-10 opacity-100 pointer-events-auto"
+                    : "z-0 opacity-100 pointer-events-none"
                 )}
-              </AnimatePresence>
+                data-slot="A"
+              >
+                {slotAVideo?.url && (
+                  <VideoPlayer
+                    id={slotAVideo.id}
+                    videoUrl={slotAVideo.url}
+                    autoplay={activeSlot === 'A' && isPlaying && (isContentPlaying || isInitialLoadRef.current) && !isNewsSlide && !isNewsImageAudio}
+                    muted={activeSlot !== 'A' || !isPlaying || !isContentPlaying || isNewsSlide || isNewsImageAudio}
+                    imageUrl={slotAVideo.imagen}
+                    onClose={() => {
+                      if (activeSlot === 'A' && !transitionSignaledRef.current && slotAVideo?.id !== 'live-stream') {
+                        handleOnEnded(setVolume, unmute);
+                      }
+                    }}
+                    onProgress={(state) => {
+                      if (activeSlot === 'A') {
+                        handleProgress(state);
+                      }
+                    }}
+                    onDuration={(d) => {
+                      if (activeSlot === 'A') {
+                        setCurrentDuration(d);
+                      }
+                    }}
+                    startAt={slotAVideo.id === lastProcessedVideoIdRef.current ? undefined : (slotAVideo.novedad ? 0 : undefined)}
+                    volumen_extra={slotAVideo.volumen_extra}
+                    audioUrl={slotAVideo.audioSourceUrl}
+                  />
+                )}
+              </div>
+
+              {/* SLOT B */}
+              <div
+                className={cn(
+                  "absolute inset-0 transition-opacity duration-700 ease-in-out",
+                  activeSlot === 'B'
+                    ? "z-10 opacity-100 pointer-events-auto"
+                    : "z-0 opacity-100 pointer-events-none"
+                )}
+                data-slot="B"
+              >
+                {slotBVideo?.url && (
+                  <VideoPlayer
+                    id={slotBVideo.id}
+                    videoUrl={slotBVideo.url}
+                    autoplay={activeSlot === 'B' && isPlaying && (isContentPlaying || isInitialLoadRef.current) && !isNewsSlide && !isNewsImageAudio}
+                    muted={activeSlot !== 'B' || !isPlaying || !isContentPlaying || isNewsSlide || isNewsImageAudio}
+                    imageUrl={slotBVideo.imagen}
+                    onClose={() => {
+                      if (activeSlot === 'B' && !transitionSignaledRef.current && slotBVideo?.id !== 'live-stream') {
+                        handleOnEnded(setVolume, unmute);
+                      }
+                    }}
+                    onProgress={(state) => {
+                      if (activeSlot === 'B') {
+                        handleProgress(state);
+                      }
+                    }}
+                    onDuration={(d) => {
+                      if (activeSlot === 'B') {
+                        setCurrentDuration(d);
+                      }
+                    }}
+                    startAt={slotBVideo.id === lastProcessedVideoIdRef.current ? undefined : (slotBVideo.novedad ? 0 : undefined)}
+                    volumen_extra={slotBVideo.volumen_extra}
+                    audioUrl={slotBVideo.audioSourceUrl}
+                  />
+                )}
+              </div>
             </div>
 
             {/* ELEMENTO AUDIO CENTRALIZADO TOP-LEVEL PARA NOTICIAS (GARANTIZA VOLUMEN AUDIBLE) */}
