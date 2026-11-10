@@ -15,6 +15,10 @@ description: Pipeline automatizado de noticias locales para Saladillo Vivo Pro (
 2. Título periodístico atractivo para lectores locales digitales.
 3. Primer párrafo (lead) con los datos esenciales (qué, quién, cuándo, dónde).
 4. Meta descripción SEO concisa (máximo 155 caracteres) y palabras clave con términos de Saladillo.
+5. **Glosario Local Centralizado (`data/glossary.json`)**:
+   - Todo texto redactado y todo guion de locución pasa por el glosario (`utils/glossary_manager.py`).
+   - Las reglas de `redaccion` corrigen ortotipografía, nombres propios e instituciones locales.
+   - Las reglas de `audio` corrigen la fonética TTS (siglas desglosadas, topónimos y pronunciación rioplatense).
 
 ## Instrucciones de Ejecución
 

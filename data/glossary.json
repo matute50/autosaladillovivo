@@ -7,7 +7,9 @@
     "caps": "CAPS",
     "udc": "UDC",
     "curs": "CURS",
-    "saladillense": "saladillense"
+    "saladillense": "saladillense",
+    "UNION APEADERRO": "Unión Apeadero",
+    "apeadero": "Apeadero"
   },
   "audio": {
     "CES": "C-E-S",
@@ -29,6 +31,7 @@
   "ambos": {
     "Saladillo vivo": "Saladillo Vivo",
     "saladillo vivo": "Saladillo Vivo",
-    "saladillo": "Saladillo"
+    "saladillo": "Saladillo",
+    "UNION APEADERRO": "Unión Apeadero"
   }
 }
