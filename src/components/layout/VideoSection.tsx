@@ -769,7 +769,7 @@ const VideoSection: React.FC = () => {
                   transition={{ duration: 2.0, ease: "easeOut" }}
                 />
               )}
-              {areCinematicBarsActive && (
+              {areCinematicBarsActive && !isNewsContent && (
                 <motion.div
                   key="cinematic-bar-bottom-solid"
                   className="absolute bottom-0 left-0 right-0 h-[14%] bg-black z-[45] pointer-events-auto"
@@ -779,7 +779,7 @@ const VideoSection: React.FC = () => {
                   transition={{ duration: 1.2, ease: "easeInOut" }}
                 />
               )}
-              {areCinematicBarsActive && (
+              {areCinematicBarsActive && !isNewsContent && (
                 <motion.div
                   key="cinematic-bar-bottom-gradient"
                   className="absolute bottom-0 left-0 right-0 h-[35%] bg-gradient-to-t from-black via-black/90 to-transparent z-[45] pointer-events-auto"

@@ -7,9 +7,9 @@ con diseño cinematográfico, fotografías optimizadas y locución con acento ri
 Los slides generados son alojados en el bucket público 'slides' de Supabase Storage.
 
 Características:
-- Diseño responsive TV-Grade con logo de Saladillo Vivo y controles ARIA.
-- Locución en acento rioplatense usando gTTS con tld='com.ar'.
-- Optimización y redimensionado de imágenes con Pillow.
+- Diseño responsive TV-Grade con logo de Saladillo Vivo, Lower Thirds y controles ARIA.
+- Locución en acento rioplatense auténtico usando Voxtral TTS (Elena, voz_483) con preprocesador fonético.
+- Optimización y redimensionado de imágenes Full HD con Pillow (Lanczos).
 - Plantilla Jinja2 interactiva con reproducción de audio automática y fallback manual.
 - Subida a Supabase Storage con headers públicos y mime-type 'text/html; charset=utf-8'.
 """
@@ -508,14 +508,14 @@ class SlideGeneratorAgent:
     """
     Agente de generación de slides interactivos con voz rioplatense para Saladillo Vivo.
     """
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides", voice: str = "es-AR-TomasNeural"):
+    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides", voice: str = "voxtral-elena"):
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url or "https://otwvfihzaznyjvjtkvvd.supabase.co").rstrip('/')
         self.supabase_key = supabase_key or env_key or ""
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "slides"
-        self.voice = voice  # es-AR-TomasNeural (Voz masculina español rioplatense argentina)
+        self.voice = voice  # Voxtral TTS Elena (voz femenina español rioplatense argentina)
         self.logger = logger
 
         # Cliente Supabase SDK oficial
