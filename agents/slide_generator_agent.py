@@ -603,6 +603,37 @@ class SlideGeneratorAgent:
             self.logger.error(f"Voxtral TTS en slides falló: {e}")
         return None
 
+    def upload_audio_to_supabase(self, audio_bytes: bytes, filename: str) -> Optional[str]:
+        """Sube un archivo de audio MP3 al bucket 'audios' de Supabase Storage."""
+        if not HAS_REQUESTS or not self.supabase_key or not audio_bytes:
+            return None
+        try:
+            if self.supabase:
+                try:
+                    storage_obj = self.supabase.storage.from_("audios")
+                    try:
+                        storage_obj.upload(
+                            path=filename,
+                            file=audio_bytes,
+                            file_options={"content-type": "audio/mpeg", "upsert": "true"}
+                        )
+                    except Exception:
+                        storage_obj.upload(path=filename, file=audio_bytes)
+                    public_url = storage_obj.get_public_url(filename)
+                    if public_url:
+                        return public_url
+                except Exception as e:
+                    self.logger.warning(f"Fallo upload audio vía SDK: {e}")
+
+            upload_url = f"{self.supabase_url}/storage/v1/object/audios/{filename}"
+            headers = self._get_storage_headers("audio/mpeg")
+            resp = requests.post(upload_url, headers=headers, data=audio_bytes, timeout=25)
+            if resp.status_code in (200, 201):
+                return f"{self.supabase_url}/storage/v1/object/public/audios/{filename}"
+        except Exception as e:
+            self.logger.warning(f"Error subiendo audio a Supabase Storage: {e}")
+        return None
+
     def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
         """
         Procesa, analiza y optimiza imágenes para el slide garantizando MÁXIMA RESOLUCIÓN FULL HD:
@@ -615,7 +646,7 @@ class SlideGeneratorAgent:
         processed_images: List[Dict] = []
 
         if not image_urls:
-            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": False}]
+            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": True}]
 
         for i, image_url in enumerate(image_urls):
             if not image_url or not isinstance(image_url, str):
@@ -662,17 +693,8 @@ class SlideGeneratorAgent:
                     if resp and resp.status_code == 200:
                         raw_bytes = resp.content
 
-                        # 0. Resolución mínima para el zoom de Ken Burns (evita pixelar)
+                        # 0. Ken Burns habilitado siempre: la imagen es mejorada y reescalada a Full HD con Lanczos
                         enable_kb = True
-                        if HAS_PIL:
-                            try:
-                                test_img = Image.open(io.BytesIO(raw_bytes))
-                                _w, _h = test_img.size
-                                if _w < 800 or _h < 600:
-                                    enable_kb = False
-                                    self.logger.info(f"  [SlideGen] Imagen {i} baja resolución ({_w}x{_h}) → Ken Burns desactivado")
-                            except Exception:
-                                pass
 
                         # 1. Determinar centro de atención, encuadre y tipo con IA / visión por computadora
                         focal_x, focal_y, is_banner, method = self.detect_attention_center(raw_bytes, downloaded_url)
@@ -708,10 +730,10 @@ class SlideGeneratorAgent:
                 "focal_y": 48.0,
                 "is_banner": is_fallback_banner,
                 "method": "fallback",
-                "enable_ken_burns": False
+                "enable_ken_burns": True
             })
 
-        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": False}]
+        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": True}]
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
                           audio_url: str, images: List[str], audio_duration: Optional[float] = None,
@@ -719,15 +741,24 @@ class SlideGeneratorAgent:
         """
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
         La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
-        durante la duración del audio del slide, con un zoom in 50% más profundo.
-        Incluye Lower Thirds flotantes dinámicos y Placa Central ("Rack Focus") generados por IA,
-        adaptándose automáticamente en 3 actos (>8.5s) o modo flash directo (<=8.5s).
+        durante la duración del audio del slide, con un zoom in cinematográfico continuo.
+        Incluye Lower Thirds flotantes dinámicos de apertura y remate, y Placa Central con efecto
+        Rack Focus generados por IA, adaptándose en 3 actos (>8.5s) o modo flash directo (<=8.5s).
         """
-        if not audio_duration:
+        if not audio_duration or audio_duration <= 0:
             audio_duration = self.estimate_audio_duration(text)
 
-        if not visuals or not isinstance(visuals, dict) or not visuals.get('placa'):
-            visuals = self.generate_default_visuals(title, text)
+        default_v = self.generate_default_visuals(title, text)
+        if not visuals or not isinstance(visuals, dict):
+            visuals = default_v
+        else:
+            for k, v in default_v.items():
+                if k not in visuals or not visuals[k]:
+                    visuals[k] = v
+            if isinstance(visuals.get('placa'), dict) and isinstance(default_v.get('placa'), dict):
+                for pk, pv in default_v['placa'].items():
+                    if pk not in visuals['placa'] or not visuals['placa'][pk]:
+                        visuals['placa'][pk] = pv
 
         total_photos = len(images) if images else 1
         photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
@@ -822,43 +853,139 @@ class SlideGeneratorAgent:
             animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
-        /* BANNERS / AFICHES */
+        /* BANNERS / AFICHES (Contenidos con zoom elegante continuo) */
         .photo-slide.is-banner .photo-main {
             object-fit: contain !important;
-            transform-origin: 50% 50% !important;
-            animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-out forwards !important;
+            animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
         }
 
         @keyframes kenBurnsBanner {
-            0% { transform: scale(0.95); }
+            0% { transform: scale(1.0); }
+            50% { transform: scale(1.06); }
             100% { transform: scale(1.0); }
         }
 
         @keyframes kenBurnsPhoto {
             0% { transform: scale(1.0); }
-            50% { transform: scale(1.27); }
+            50% { transform: scale(1.22); }
             100% { transform: scale(1.0); }
-        }
-
-        /* Desactivar Ken Burns para imágenes de baja resolución */
-        .photo-main.no-ken-burns {
-            animation: none;
         }
 
         /*
            Animación Ken Burns adaptada a la duración exacta del audio
            Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
            durante el tiempo de reproducción del audio.
-           - Zoom In 50% más profundo: scale(1.0) -> scale(1.27) (aumento de delta de +18% a +27%)
-           - Ciclo 1: 0% a 25% (Zoom In) -> 25% a 50% (Zoom Out)
-           - Ciclo 2: 50% a 75% (Zoom In) -> 75% a 100% (Zoom Out)
         */
         @keyframes kenBurnsZoom {
             0% { transform: scale(1.0); }
-            25% { transform: scale(1.27); }
+            25% { transform: scale(1.22); }
             50% { transform: scale(1.0); }
-            75% { transform: scale(1.27); }
+            75% { transform: scale(1.22); }
             100% { transform: scale(1.0); }
+        }
+
+        /* ==========================================================================
+           LOWER THIRD FLOTANTE (Acto 1 & 3: Apertura y Remate)
+           ========================================================================== */
+        .floating-lower-third {
+            position: absolute;
+            bottom: 5.5%;
+            left: 4.5%;
+            max-width: 88%;
+            min-width: 260px;
+            z-index: 20;
+            background: rgba(6, 12, 28, 0.90);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-left: 4px solid var(--color-primary);
+            border-radius: 12px;
+            padding: 10px 18px 10px 18px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 51, 153, 0.35);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: opacity, transform;
+        }
+
+        .floating-lower-third.hidden-stage {
+            opacity: 0;
+            transform: translateY(14px) scale(0.97);
+            pointer-events: none;
+        }
+
+        .lt-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .lt-badge {
+            display: inline-flex;
+            align-items: center;
+            background: var(--color-primary);
+            color: #ffffff;
+            font-size: clamp(0.65rem, 1.2vw, 0.78rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 51, 153, 0.45);
+        }
+
+        .lt-brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255, 255, 255, 0.92);
+            font-size: clamp(0.65rem, 1.2vw, 0.76rem);
+            font-weight: 800;
+            letter-spacing: 0.1em;
+        }
+
+        .lt-live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            animation: pulseDot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .lt-content-wrap {
+            margin-bottom: 8px;
+        }
+
+        .lt-headline {
+            color: #ffffff;
+            font-size: clamp(0.95rem, 2.2vw, 1.4rem);
+            font-weight: 700;
+            line-height: 1.25;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+            transition: opacity 0.35s ease;
+        }
+
+        .lt-progress-track {
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .lt-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+            transition: width 0.1s linear;
         }
 
         /* ==========================================================================
@@ -867,35 +994,35 @@ class SlideGeneratorAgent:
         .rack-focus-layer {
             position: absolute;
             inset: 0;
-            z-index: 5;
+            z-index: 10;
             pointer-events: none;
             opacity: 0;
             background: rgba(3, 7, 18, 0);
             backdrop-filter: blur(0px);
             -webkit-backdrop-filter: blur(0px);
-            transition: opacity 0.85s cubic-bezier(0.16, 1, 0.3, 1),
-                        backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
-                        -webkit-backdrop-filter 0.85s cubic-bezier(0.16, 1, 0.3, 1),
-                        background 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+                        backdrop-filter 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+                        -webkit-backdrop-filter 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+                        background 0.75s cubic-bezier(0.16, 1, 0.3, 1);
             will-change: opacity, backdrop-filter, background;
         }
 
         .rack-focus-layer.active {
             opacity: 1;
             background: rgba(3, 7, 18, 0.72);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
         }
 
         /* ==========================================================================
-           PLACA GRÁFICA EDITORIAL COMPLETA (OPCIÓN B: Alterna con la foto limpia)
+           PLACA CENTRAL DE IMPACTO (Acto 2: Citas, Cifras o Síntesis)
            ========================================================================== */
-        .full-placa-board {
+        .central-card {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%) scale(0.95);
-            width: min(88%, 780px);
+            width: min(88%, 760px);
             max-height: 86%;
             z-index: 15;
             opacity: 0;
@@ -909,8 +1036,8 @@ class SlideGeneratorAgent:
             padding: clamp(20px, 3.8vw, 36px) clamp(22px, 4.5vw, 44px);
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 50px rgba(0, 51, 153, 0.35);
             text-align: center;
-            transition: opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -918,13 +1045,13 @@ class SlideGeneratorAgent:
             will-change: opacity, transform;
         }
 
-        .full-placa-board.visible-stage {
+        .central-card.visible-stage {
             opacity: 1;
             pointer-events: auto;
             transform: translate(-50%, -50%) scale(1.0);
         }
 
-        .placa-header {
+        .card-top-bar {
             width: 100%;
             display: flex;
             align-items: center;
@@ -935,7 +1062,7 @@ class SlideGeneratorAgent:
             border-bottom: 1px solid rgba(255, 255, 255, 0.12);
         }
 
-        .placa-brand {
+        .card-brand {
             display: inline-flex;
             align-items: center;
             gap: 8px;
@@ -945,7 +1072,7 @@ class SlideGeneratorAgent:
             letter-spacing: 0.12em;
         }
 
-        .placa-live-dot {
+        .card-live-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
@@ -954,12 +1081,7 @@ class SlideGeneratorAgent:
             animation: pulseDot 2s infinite ease-in-out;
         }
 
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
-        }
-
-        .placa-kicker-badge {
+        .card-badge {
             background: var(--color-primary);
             color: #ffffff;
             font-size: clamp(0.65rem, 1.2vw, 0.8rem);
@@ -971,7 +1093,7 @@ class SlideGeneratorAgent:
             box-shadow: 0 2px 10px rgba(0, 51, 153, 0.5);
         }
 
-        .placa-context-title {
+        .card-context-title {
             color: var(--color-accent-sky);
             font-size: clamp(0.75rem, 1.4vw, 0.9rem);
             font-weight: 700;
@@ -980,7 +1102,7 @@ class SlideGeneratorAgent:
             margin-bottom: 12px;
         }
 
-        .placa-quote-mark {
+        .card-quote-icon {
             font-size: clamp(2.8rem, 6vw, 4.2rem);
             line-height: 0.6;
             color: var(--color-primary-light);
@@ -989,7 +1111,7 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 16px rgba(0, 85, 255, 0.6);
         }
 
-        .placa-quote-text {
+        .card-quote-text {
             color: #ffffff;
             font-size: clamp(1.1rem, 2.5vw, 1.65rem);
             font-weight: 600;
@@ -999,7 +1121,7 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
         }
 
-        .placa-author-badge {
+        .card-author-line {
             color: var(--color-accent-sky);
             font-size: clamp(0.8rem, 1.5vw, 1.05rem);
             font-weight: 800;
@@ -1007,7 +1129,7 @@ class SlideGeneratorAgent:
             text-transform: uppercase;
         }
 
-        .placa-stat-number {
+        .card-stat-number {
             color: #ffffff;
             font-size: clamp(2.4rem, 6vw, 4.5rem);
             font-weight: 900;
@@ -1017,14 +1139,14 @@ class SlideGeneratorAgent:
             text-shadow: 0 4px 24px rgba(0, 85, 255, 0.7);
         }
 
-        .placa-stat-desc {
+        .card-stat-desc {
             color: rgba(255, 255, 255, 0.95);
             font-size: clamp(0.95rem, 2vw, 1.35rem);
             font-weight: 600;
             line-height: 1.35;
         }
 
-        .placa-summary-headline {
+        .card-headline-strong {
             color: #ffffff;
             font-size: clamp(1.15rem, 2.6vw, 1.7rem);
             font-weight: 800;
@@ -1033,14 +1155,14 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
         }
 
-        .placa-summary-body {
+        .card-summary-desc {
             color: rgba(255, 255, 255, 0.92);
             font-size: clamp(0.9rem, 2vw, 1.25rem);
             font-weight: 500;
             line-height: 1.4;
         }
 
-        .placa-progress-track {
+        .card-progress-track {
             width: 100%;
             height: 3px;
             background: rgba(255, 255, 255, 0.16);
@@ -1049,7 +1171,7 @@ class SlideGeneratorAgent:
             overflow: hidden;
         }
 
-        .placa-progress-bar {
+        .card-progress-bar {
             width: 0%;
             height: 100%;
             background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
@@ -1063,7 +1185,7 @@ class SlideGeneratorAgent:
         {% for img in images %}
         <div class="photo-slide {% if loop.first %}active{% endif %} {% if img.is_banner %}is-banner{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
-            <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main{% if not (img.enable_ken_burns is defined and img.enable_ken_burns) %} no-ken-burns{% endif %}"
+            <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
                  onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
         </div>
@@ -1073,42 +1195,59 @@ class SlideGeneratorAgent:
     <!-- CAPA RACK FOCUS (DESENFOQUE CINEMÁTICO SOBRE LA FOTO) -->
     <div class="rack-focus-layer" id="rackFocusLayer"></div>
 
-    <!-- PLACA GRÁFICA EDITORIAL COMPLETA (OPCIÓN B) -->
-    <div class="full-placa-board" id="fullPlacaBoard">
-        <div class="placa-header">
-            <div class="placa-brand">
-                <span class="placa-live-dot"></span>
+    <!-- PLACA CENTRAL DE IMPACTO (ACTO 2: Citas, Cifras o Síntesis) -->
+    <div class="central-card" id="centralCard">
+        <div class="card-top-bar">
+            <div class="card-brand">
+                <span class="card-live-dot"></span>
                 SALADILLO VIVO
             </div>
-            <div class="placa-kicker-badge">{{ visuals.kicker }}</div>
+            <div class="card-badge">{{ visuals.kicker }}</div>
         </div>
 
         {% if visuals.tipo_placa == 'CITA' %}
-        <div class="placa-quote-mark">“</div>
-        <div class="placa-quote-text">{{ visuals.placa.destacado }}</div>
-        <div class="placa-author-badge">— {{ visuals.placa.bajada }}</div>
+        <div class="card-quote-icon">“</div>
+        <div class="card-quote-text">{{ visuals.placa.destacado }}</div>
+        <div class="card-author-line">— {{ visuals.placa.bajada }}</div>
         {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
-        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="placa-stat-number">{{ visuals.placa.destacado }}</div>
-        <div class="placa-stat-desc">{{ visuals.placa.bajada }}</div>
+        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="card-stat-number">{{ visuals.placa.destacado }}</div>
+        <div class="card-stat-desc">{{ visuals.placa.bajada }}</div>
         {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
-        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="placa-summary-headline">{{ visuals.placa.destacado }}</div>
-        <div class="placa-stat-desc">{{ visuals.placa.bajada }}</div>
+        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="card-headline-strong">{{ visuals.placa.destacado }}</div>
+        <div class="card-stat-desc">{{ visuals.placa.bajada }}</div>
         {% else %}
         <!-- RESUMEN EDITORIAL -->
-        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="placa-summary-headline">{{ visuals.placa.destacado }}</div>
-        <div class="placa-summary-body">{{ visuals.placa.bajada }}</div>
+        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="card-headline-strong">{{ visuals.placa.destacado }}</div>
+        <div class="card-summary-desc">{{ visuals.placa.bajada }}</div>
         {% endif %}
 
-        <div class="placa-progress-track">
-            <div class="placa-progress-bar" id="placaProgressBar"></div>
+        <div class="card-progress-track">
+            <div class="card-progress-bar" id="cardProgressBar"></div>
+        </div>
+    </div>
+
+    <!-- LOWER THIRD FLOTANTE (ACTO 1 Y ACTO 3) -->
+    <div class="floating-lower-third" id="floatingLowerThird">
+        <div class="lt-header">
+            <span class="lt-badge" id="ltKicker">{{ visuals.kicker }}</span>
+            <span class="lt-brand">
+                <span class="lt-live-dot"></span>
+                SALADILLO VIVO
+            </span>
+        </div>
+        <div class="lt-content-wrap">
+            <h2 class="lt-headline" id="ltHeadline">{{ visuals.titular_apertura }}</h2>
+        </div>
+        <div class="lt-progress-track">
+            <div class="lt-progress-bar" id="ltProgressBar"></div>
         </div>
     </div>
 
     {% if audio_url %}
-    <audio id="slideAudio" src="{{ audio_url }}" preload="auto" playsinline style="display:none;"></audio>
+    <audio id="slideAudio" src="{{ audio_url }}" preload="auto" autoplay playsinline style="display:none;"></audio>
     {% endif %}
 
     <script>
@@ -1116,12 +1255,18 @@ class SlideGeneratorAgent:
             var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
             var rackFocus = document.getElementById('rackFocusLayer');
-            var placaBoard = document.getElementById('fullPlacaBoard');
-            var placaProgressBar = document.getElementById('placaProgressBar');
+            var centralCard = document.getElementById('centralCard');
+            var lowerThird = document.getElementById('floatingLowerThird');
+            var ltHeadline = document.getElementById('ltHeadline');
+            var ltProgressBar = document.getElementById('ltProgressBar');
+            var cardProgressBar = document.getElementById('cardProgressBar');
 
+            var titularApertura = {{ visuals.titular_apertura | tojson }};
+            var remateCierre = {{ visuals.remate | tojson }};
             var estimatedDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
             var activeDuration = estimatedDuration;
-            var currentStage = 0; // 1: Foto Limpia Inicio, 2: Placa Gráfica Completa, 3: Foto Limpia Cierre
+            var isShortMode = (activeDuration <= 8.5);
+            var currentStage = 0; // 1: Apertura (Lower Third), 2: Placa Central, 3: Remate (Lower Third)
             var slideInterval = null;
             var hasParentUpdates = false;
             var startTime = performance.now();
@@ -1130,32 +1275,61 @@ class SlideGeneratorAgent:
                 if (!totalDuration || totalDuration <= 0) return;
                 var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
 
-                // FASE 1 (0% a 28%): FOTO 100% LIMPIA con Ken Burns protagonista
+                if (isShortMode) {
+                    // Modo Flash Directo (<= 8.5s): Lower third permanente, foto limpia con Ken Burns
+                    if (currentStage !== 1) {
+                        currentStage = 1;
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = titularApertura;
+                        if (rackFocus) rackFocus.classList.remove('active');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                    }
+                    if (ltProgressBar) {
+                        ltProgressBar.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
+                    }
+                    return;
+                }
+
+                // Modo 3 Actos TV-Grade (> 8.5s)
+                // ACTO 1 (0% a 28%): Foto nítida con Ken Burns + LOWER THIRD de apertura
                 if (ratio < 0.28) {
                     if (currentStage !== 1) {
                         currentStage = 1;
                         if (rackFocus) rackFocus.classList.remove('active');
-                        if (placaBoard) placaBoard.classList.remove('visible-stage');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = titularApertura;
+                    }
+                    var actProgress = ratio / 0.28;
+                    if (ltProgressBar) {
+                        ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
                     }
                 }
-                // FASE 2 (28% a 75%): PLACA GRÁFICA COMPLETA + Rack Focus sobre la foto
-                else if (ratio < 0.75) {
+                // ACTO 2 (28% a 72%): RACK FOCUS sobre la foto + PLACA CENTRAL EDITORIAL
+                else if (ratio < 0.72) {
                     if (currentStage !== 2) {
                         currentStage = 2;
+                        if (lowerThird) lowerThird.classList.add('hidden-stage');
                         if (rackFocus) rackFocus.classList.add('active');
-                        if (placaBoard) placaBoard.classList.add('visible-stage');
+                        if (centralCard) centralCard.classList.add('visible-stage');
                     }
-                    var phaseRatio = (ratio - 0.28) / (0.75 - 0.28);
-                    if (placaProgressBar) {
-                        placaProgressBar.style.width = Math.min(100, Math.round(phaseRatio * 100)) + '%';
+                    var phaseRatio = (ratio - 0.28) / (0.72 - 0.28);
+                    if (cardProgressBar) {
+                        cardProgressBar.style.width = Math.min(100, Math.round(phaseRatio * 100)) + '%';
                     }
                 }
-                // FASE 3 (75% a 100%): RETORNO A FOTO LIMPIA para el remate final
+                // ACTO 3 (72% a 100%): Retorno a foto nítida + LOWER THIRD con remate final
                 else {
                     if (currentStage !== 3) {
                         currentStage = 3;
                         if (rackFocus) rackFocus.classList.remove('active');
-                        if (placaBoard) placaBoard.classList.remove('visible-stage');
+                        if (centralCard) centralCard.classList.remove('visible-stage');
+                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
+                        if (ltHeadline) ltHeadline.textContent = remateCierre;
+                    }
+                    var actProgress = (ratio - 0.72) / (1.0 - 0.72);
+                    if (ltProgressBar) {
+                        ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
                     }
                 }
             }
@@ -1163,6 +1337,7 @@ class SlideGeneratorAgent:
             function applyDuration(durSec) {
                 if (!durSec || !isFinite(durSec) || durSec <= 0) return;
                 activeDuration = Math.round(durSec * 10) / 10;
+                isShortMode = (activeDuration <= 8.5);
                 document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
                 if (slides && slides.length > 1) {
@@ -1182,7 +1357,41 @@ class SlideGeneratorAgent:
                 }
             }
 
-            // 1. Escuchar mensajes del reproductor padre (VideoSection)
+            // 1. Reproducción de Audio Interno y Fallback de Autoplay
+            if (audio) {
+                audio.addEventListener('loadedmetadata', function() {
+                    if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+                        applyDuration(audio.duration);
+                    }
+                });
+
+                audio.addEventListener('timeupdate', function() {
+                    if (!hasParentUpdates && audio.duration > 0) {
+                        updateTimeline(audio.currentTime, audio.duration);
+                    }
+                });
+
+                // Intentar reproducción automática
+                var playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.then(function() {
+                        console.log("Audio de slide reproduciendo exitosamente.");
+                    }).catch(function(err) {
+                        console.warn("Autoplay restringido por el navegador. Habilitando al interactuar:", err);
+                        var unlockAudio = function() {
+                            if (!hasParentUpdates) {
+                                audio.play();
+                            }
+                            document.removeEventListener('click', unlockAudio);
+                            document.removeEventListener('touchstart', unlockAudio);
+                        };
+                        document.addEventListener('click', unlockAudio, { once: true });
+                        document.addEventListener('touchstart', unlockAudio, { once: true });
+                    });
+                }
+            }
+
+            // 2. Escuchar mensajes del reproductor padre (VideoSection / NewsSlidePlayer)
             window.addEventListener('message', function(e) {
                 if (!e.data) return;
                 if ((e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION') && e.data.duration) {
@@ -1190,6 +1399,11 @@ class SlideGeneratorAgent:
                 }
                 if (e.data.type === 'AUDIO_TIME_UPDATE') {
                     hasParentUpdates = true;
+                    // Si el reproductor padre ya está emitiendo el audio, silenciar audio interno para evitar eco
+                    if (audio && !audio.muted) {
+                        audio.muted = true;
+                        audio.pause();
+                    }
                     if (e.data.duration && isFinite(e.data.duration) && e.data.duration > 0) {
                         applyDuration(e.data.duration);
                     }
@@ -1197,20 +1411,6 @@ class SlideGeneratorAgent:
                     updateTimeline(cur, activeDuration);
                 }
             });
-
-            // 2. Escuchar audio interno si existe
-            if (audio) {
-                audio.addEventListener('loadedmetadata', function() {
-                    if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
-                        applyDuration(audio.duration);
-                    }
-                });
-                audio.addEventListener('timeupdate', function() {
-                    if (!hasParentUpdates && audio.duration > 0) {
-                        updateTimeline(audio.currentTime, audio.duration);
-                    }
-                });
-            }
 
             // 3. Reloj autónomo infalible de respaldo (garantiza que NUNCA se congele)
             function autonomousLoop(now) {
@@ -1264,7 +1464,10 @@ class SlideGeneratorAgent:
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
             html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
+            html = html.replace("{{ visuals.titular_apertura | tojson }}", json.dumps(visuals.get("titular_apertura", title)))
+            html = html.replace("{{ visuals.remate | tojson }}", json.dumps(visuals.get("remate", "Más detalles en saladillovivo.com.ar")))
             html = html.replace("{{ visuals.kicker }}", visuals.get("kicker", "SALADILLO VIVO"))
+            html = html.replace("{{ visuals.titular_apertura }}", visuals.get("titular_apertura", title))
             html = html.replace("{{ visuals.placa.destacado }}", str(visuals.get("placa", {}).get("destacado", title)))
             html = html.replace("{{ visuals.placa.bajada }}", str(visuals.get("placa", {}).get("bajada", "")))
             html = html.replace("{{ visuals.placa.titulo }}", str(visuals.get("placa", {}).get("titulo", "INFORMACIÓN")))
@@ -1328,15 +1531,30 @@ class SlideGeneratorAgent:
                               visuals: Optional[Dict] = None) -> Optional[str]:
         """
         Procesa el ciclo completo para un artículo:
-        1. Optimización de imágenes
-        2. Renderizado del template HTML con voz y diseño (Ken Burns 2 ciclos adaptados al audio)
-        3. Generación de nombre único de archivo
-        4. Subida al bucket 'slides' de Supabase Storage
-        5. Retorna la URL pública del slide
+        1. Verificación o generación de audio rioplatense (si falta audio_url)
+        2. Optimización y análisis visual de imágenes (Ken Burns + IA focal point)
+        3. Renderizado del template HTML con voz y diseño TV-Grade (Lower Thirds + Placa Central)
+        4. Generación de nombre único de archivo
+        5. Subida al bucket 'slides' de Supabase Storage
+        6. Retorna la URL pública del slide
         """
         self.logger.info(f"Generando slide para artículo {article_id}: \"{title[:40]}...\"")
 
         try:
+            # Si no viene audio_url, intentar sintetizarlo y subirlo a Storage
+            if not audio_url:
+                self.logger.info(f"Slide sin audio_url para artículo {article_id}. Generando voz rioplatense...")
+                audio_bytes = self.text_to_speech_rioplatense(text)
+                if audio_bytes:
+                    audio_fn = f"audio_{article_id}_{hashlib.md5(text.encode()).hexdigest()[:8]}.mp3"
+                    uploaded_audio = self.upload_audio_to_supabase(audio_bytes, audio_fn)
+                    if uploaded_audio:
+                        audio_url = uploaded_audio
+                        self.logger.info(f"Audio generado y alojado para slide {article_id}: {audio_url}")
+
+            if not audio_duration or audio_duration <= 0:
+                audio_duration = self.estimate_audio_duration(text)
+
             images = self.process_images_for_slide(article_id, image_urls or [])
 
             html_content = self.create_slide_html(
@@ -1433,7 +1651,8 @@ class SlideGeneratorAgent:
                         text=article.get('text') or '',
                         audio_url=audio_url,
                         image_urls=img_list,
-                        audio_duration=audio_dur
+                        audio_duration=audio_dur,
+                        visuals=article.get('slide_visuals')
                     )
                     results[article_id] = slide_url
                 else:

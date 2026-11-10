@@ -26,7 +26,7 @@ class StorageAgentRecentArticlesTests(unittest.TestCase):
 
         get_mock.assert_called_once()
         params = get_mock.call_args.kwargs["params"]
-        self.assertEqual("id,title,text,slug,status,is_published,created_at,updatedAt", params["select"])
+        self.assertEqual("id,title,text,slug,status,is_published,created_at,updatedAt,audio_url,url_slide,image_url,og_image_url,thumbnail_url", params["select"])
         self.assertEqual("created_at.desc", params["order"])
         self.assertEqual(10, params["limit"])
         self.assertIn("created_at", params)
