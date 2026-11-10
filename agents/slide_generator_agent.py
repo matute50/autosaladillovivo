@@ -124,34 +124,47 @@ class SlideGeneratorAgent:
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
         words = clean_title.split()
         titular_apertura = " ".join(words[:10]).rstrip(' ,.:;')
+        full_context = f"{clean_title}. {text}"
 
-        quote_match = re.search(r'["“]([^"”]{15,120})["”]', text)
-        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones|mil)?|\d+\s*(?:millones|cuadras|viviendas|hectáreas|alumnos|casos|efectivos|%))', text, re.IGNORECASE)
+        quote_match = re.search(r'["“]([^"”]{12,140})["”]', full_context)
+        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones?|mil|pesos|dólares)?|\b\d+[\d\.,]*\s*(?:millones?|cuadras?|viviendas?|hectáreas?|alumnos?|casos|efectivos|%|km)\b)', full_context, re.IGNORECASE)
 
         if quote_match:
             tipo_placa = "CITA"
+            author = "DECLARACIÓN EN SALADILLO VIVO"
+            if re.search(r'salom[oó]n|intendente', full_context, re.I):
+                author = "JOSÉ LUIS SALOMÓN | INTENDENTE"
+            elif re.search(r'comisar|polic', full_context, re.I):
+                author = "AUTORIDADES POLICIALES"
+            elif re.search(r'hospital|salud|director|m[eé]dic', full_context, re.I):
+                author = "AUTORIDADES DE SALUD"
+
             placa = {
-                "titulo": "DECLARACIÓN",
+                "titulo": "DECLARACIÓN DESTACADA",
                 "destacado": f'"{quote_match.group(1).strip()}"',
-                "bajada": "Testimonio en Saladillo Vivo"
+                "bajada": author
             }
         elif stat_match:
             tipo_placa = "DATO_NUMERICO"
+            bajada_stat = clean_title
+            if len(bajada_stat) > 75:
+                bajada_stat = bajada_stat[:72].rsplit(' ', 1)[0] + '...'
+
             placa = {
                 "titulo": "CIFRA DESTACADA",
                 "destacado": stat_match.group(1).upper().strip(),
-                "bajada": "Dato central del informe periodístico"
+                "bajada": bajada_stat
             }
         else:
             tipo_placa = "RESUMEN"
             sentences = [s.strip() for s in re.split(r'[\.\n]+', text) if len(s.strip()) > 25]
-            summary_text = sentences[0] if sentences else titular_apertura
+            summary_text = sentences[0] if sentences else clean_title
             if len(summary_text) > 85:
                 summary_text = summary_text[:82].rsplit(' ', 1)[0] + '...'
             placa = {
-                "titulo": "SÍNTESIS",
-                "destacado": summary_text,
-                "bajada": "Cobertura especial Saladillo Vivo"
+                "titulo": "SÍNTESIS DE LA NOTICIA",
+                "destacado": clean_title,
+                "bajada": summary_text
             }
 
         remate = "Más detalles en saladillovivo.com.ar"
@@ -849,7 +862,7 @@ class SlideGeneratorAgent:
         }
 
         /* ==========================================================================
-           RACK FOCUS LAYER (Desenfoque cinemático sobre la imagen sin frenar Ken Burns)
+           RACK FOCUS LAYER (Desenfoque cinemático sobre la foto sin frenar Ken Burns)
            ========================================================================== */
         .rack-focus-layer {
             position: absolute;
@@ -869,177 +882,75 @@ class SlideGeneratorAgent:
 
         .rack-focus-layer.active {
             opacity: 1;
-            background: rgba(4, 9, 22, 0.65);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            background: rgba(3, 7, 18, 0.72);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
         }
 
         /* ==========================================================================
-           PLACA CENTRAL DE IMPACTO (Acto 2: Citas, Cifras o Síntesis)
+           PLACA GRÁFICA EDITORIAL COMPLETA (OPCIÓN B: Alterna con la foto limpia)
            ========================================================================== */
-        .central-card {
+        .full-placa-board {
             position: absolute;
             top: 50%;
             left: 50%;
-            transform: translate(-50%, -50%) scale(0.94);
-            max-width: 84%;
-            width: auto;
-            min-width: 280px;
-            z-index: 12;
+            transform: translate(-50%, -50%) scale(0.95);
+            width: min(88%, 780px);
+            max-height: 86%;
+            z-index: 15;
             opacity: 0;
             pointer-events: none;
-            background: rgba(8, 14, 30, 0.92);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(0, 85, 255, 0.35);
-            border-radius: 18px;
-            padding: 24px 32px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 51, 153, 0.35);
+            background: rgba(6, 12, 28, 0.94);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border: 1px solid rgba(0, 85, 255, 0.4);
+            border-top: 4px solid var(--color-primary);
+            border-radius: 20px;
+            padding: clamp(20px, 3.8vw, 36px) clamp(22px, 4.5vw, 44px);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 50px rgba(0, 51, 153, 0.35);
             text-align: center;
-            transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             will-change: opacity, transform;
         }
 
-        .central-card.visible-stage {
+        .full-placa-board.visible-stage {
             opacity: 1;
             pointer-events: auto;
             transform: translate(-50%, -50%) scale(1.0);
         }
 
-        .card-inner {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .card-kicker {
-            color: var(--color-accent-sky);
-            font-size: clamp(0.7rem, 1.4vw, 0.85rem);
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            margin-bottom: 8px;
-        }
-
-        .card-quote-icon {
-            font-size: clamp(2.5rem, 5.5vw, 3.8rem);
-            line-height: 0.7;
-            color: var(--color-primary-light);
-            margin-bottom: 8px;
-            font-family: Georgia, serif;
-            text-shadow: 0 2px 14px rgba(0, 85, 255, 0.6);
-        }
-
-        .card-quote-text {
-            color: #ffffff;
-            font-size: clamp(1rem, 2.4vw, 1.55rem);
-            font-weight: 600;
-            font-style: italic;
-            line-height: 1.35;
-            margin-bottom: 12px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-        }
-
-        .card-author-line {
-            color: var(--color-accent-sky);
-            font-size: clamp(0.75rem, 1.6vw, 0.95rem);
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-        }
-
-        .card-big-stat {
-            color: #ffffff;
-            font-size: clamp(2.2rem, 5.5vw, 4.2rem);
-            font-weight: 900;
-            letter-spacing: -0.02em;
-            line-height: 1.05;
-            margin-bottom: 10px;
-            text-shadow: 0 4px 20px rgba(0, 85, 255, 0.7);
-        }
-
-        .card-stat-bajada, .card-summary-text, .card-key-item {
-            color: rgba(255, 255, 255, 0.94);
-            font-size: clamp(0.9rem, 2vw, 1.3rem);
-            line-height: 1.35;
-            font-weight: 600;
-        }
-
-        .card-summary-text {
-            font-size: clamp(1rem, 2.3vw, 1.5rem);
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        /* ==========================================================================
-           LOWER THIRD FLOTANTE (Acto 1 & 3: Apertura y Remate)
-           ========================================================================== */
-        .floating-lower-third {
-            position: absolute;
-            bottom: 5.5%;
-            left: 4.5%;
-            max-width: 88%;
-            min-width: 260px;
-            z-index: 10;
-            background: rgba(8, 14, 28, 0.90);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-left: 4px solid var(--color-primary);
-            border-radius: 12px;
-            padding: 10px 16px 8px 16px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 51, 153, 0.35);
-            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-            will-change: opacity, transform;
-        }
-
-        .floating-lower-third.hidden-stage {
-            opacity: 0;
-            transform: translateY(14px) scale(0.97);
-            pointer-events: none;
-        }
-
-        .lt-header {
+        .placa-header {
+            width: 100%;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 6px;
+            gap: 16px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
         }
 
-        .lt-badge {
+        .placa-brand {
             display: inline-flex;
             align-items: center;
-            background: var(--color-primary);
+            gap: 8px;
             color: #ffffff;
-            font-size: clamp(0.65rem, 1.2vw, 0.78rem);
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            padding: 3px 8px;
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 51, 153, 0.45);
+            font-size: clamp(0.7rem, 1.3vw, 0.85rem);
+            font-weight: 800;
+            letter-spacing: 0.12em;
         }
 
-        .lt-brand {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: clamp(0.6rem, 1.1vw, 0.72rem);
-            font-weight: 700;
-            letter-spacing: 0.08em;
-        }
-
-        .lt-live-dot {
-            width: 7px;
-            height: 7px;
+        .placa-live-dot {
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background-color: #ef4444;
-            box-shadow: 0 0 6px #ef4444;
+            box-shadow: 0 0 8px #ef4444;
             animation: pulseDot 2s infinite ease-in-out;
         }
 
@@ -1048,29 +959,101 @@ class SlideGeneratorAgent:
             50% { opacity: 0.4; transform: scale(0.85); }
         }
 
-        .lt-headline {
+        .placa-kicker-badge {
+            background: var(--color-primary);
             color: #ffffff;
-            font-size: clamp(0.9rem, 2.2vw, 1.35rem);
-            font-weight: 700;
-            line-height: 1.25;
-            margin-bottom: 8px;
-            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
-            transition: opacity 0.35s ease;
+            font-size: clamp(0.65rem, 1.2vw, 0.8rem);
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0, 51, 153, 0.5);
         }
 
-        .lt-progress-track {
+        .placa-context-title {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.75rem, 1.4vw, 0.9rem);
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .placa-quote-mark {
+            font-size: clamp(2.8rem, 6vw, 4.2rem);
+            line-height: 0.6;
+            color: var(--color-primary-light);
+            margin-bottom: 10px;
+            font-family: Georgia, serif;
+            text-shadow: 0 2px 16px rgba(0, 85, 255, 0.6);
+        }
+
+        .placa-quote-text {
+            color: #ffffff;
+            font-size: clamp(1.1rem, 2.5vw, 1.65rem);
+            font-weight: 600;
+            font-style: italic;
+            line-height: 1.35;
+            margin-bottom: 16px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        }
+
+        .placa-author-badge {
+            color: var(--color-accent-sky);
+            font-size: clamp(0.8rem, 1.5vw, 1.05rem);
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .placa-stat-number {
+            color: #ffffff;
+            font-size: clamp(2.4rem, 6vw, 4.5rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            line-height: 1.05;
+            margin-bottom: 14px;
+            text-shadow: 0 4px 24px rgba(0, 85, 255, 0.7);
+        }
+
+        .placa-stat-desc {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: clamp(0.95rem, 2vw, 1.35rem);
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .placa-summary-headline {
+            color: #ffffff;
+            font-size: clamp(1.15rem, 2.6vw, 1.7rem);
+            font-weight: 800;
+            line-height: 1.25;
+            margin-bottom: 12px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+        }
+
+        .placa-summary-body {
+            color: rgba(255, 255, 255, 0.92);
+            font-size: clamp(0.9rem, 2vw, 1.25rem);
+            font-weight: 500;
+            line-height: 1.4;
+        }
+
+        .placa-progress-track {
             width: 100%;
             height: 3px;
             background: rgba(255, 255, 255, 0.16);
             border-radius: 2px;
+            margin-top: 22px;
             overflow: hidden;
         }
 
-        .lt-progress-bar {
+        .placa-progress-bar {
             width: 0%;
             height: 100%;
             background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
-            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
             transition: width 0.1s linear;
         }
     </style>
@@ -1087,47 +1070,40 @@ class SlideGeneratorAgent:
         {% endfor %}
     </div>
 
-    <!-- CAPA RACK FOCUS -->
+    <!-- CAPA RACK FOCUS (DESENFOQUE CINEMÁTICO SOBRE LA FOTO) -->
     <div class="rack-focus-layer" id="rackFocusLayer"></div>
 
-    <!-- PLACA CENTRAL DE IMPACTO (ACTO 2) -->
-    <div class="central-card" id="centralCard">
-        <div class="card-inner">
-            {% if visuals.tipo_placa == 'CITA' %}
-            <div class="card-quote-icon">“</div>
-            <p class="card-quote-text" id="cardDestacado">{{ visuals.placa.destacado }}</p>
-            <div class="card-author-line" id="cardBajada">— {{ visuals.placa.bajada }}</div>
-            {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
-            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
-            <div class="card-big-stat" id="cardDestacado">{{ visuals.placa.destacado }}</div>
-            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
-            {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
-            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
-            <div class="card-key-item" id="cardDestacado">{{ visuals.placa.destacado }}</div>
-            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
-            {% else %}
-            <!-- RESUMEN -->
-            <div class="card-kicker">{{ visuals.placa.titulo }}</div>
-            <div class="card-summary-text" id="cardDestacado">{{ visuals.placa.destacado }}</div>
-            <div class="card-stat-bajada" id="cardBajada">{{ visuals.placa.bajada }}</div>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- LOWER THIRD FLOTANTE (ACTO 1 Y ACTO 3) -->
-    <div class="floating-lower-third" id="floatingLowerThird">
-        <div class="lt-header">
-            <span class="lt-badge" id="ltKicker">{{ visuals.kicker }}</span>
-            <span class="lt-brand">
-                <span class="lt-live-dot"></span>
+    <!-- PLACA GRÁFICA EDITORIAL COMPLETA (OPCIÓN B) -->
+    <div class="full-placa-board" id="fullPlacaBoard">
+        <div class="placa-header">
+            <div class="placa-brand">
+                <span class="placa-live-dot"></span>
                 SALADILLO VIVO
-            </span>
+            </div>
+            <div class="placa-kicker-badge">{{ visuals.kicker }}</div>
         </div>
-        <div class="lt-content-wrap">
-            <h2 class="lt-headline" id="ltHeadline">{{ visuals.titular_apertura }}</h2>
-        </div>
-        <div class="lt-progress-track">
-            <div class="lt-progress-bar" id="ltProgressBar"></div>
+
+        {% if visuals.tipo_placa == 'CITA' %}
+        <div class="placa-quote-mark">“</div>
+        <div class="placa-quote-text">{{ visuals.placa.destacado }}</div>
+        <div class="placa-author-badge">— {{ visuals.placa.bajada }}</div>
+        {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
+        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="placa-stat-number">{{ visuals.placa.destacado }}</div>
+        <div class="placa-stat-desc">{{ visuals.placa.bajada }}</div>
+        {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
+        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="placa-summary-headline">{{ visuals.placa.destacado }}</div>
+        <div class="placa-stat-desc">{{ visuals.placa.bajada }}</div>
+        {% else %}
+        <!-- RESUMEN EDITORIAL -->
+        <div class="placa-context-title">{{ visuals.placa.titulo }}</div>
+        <div class="placa-summary-headline">{{ visuals.placa.destacado }}</div>
+        <div class="placa-summary-body">{{ visuals.placa.bajada }}</div>
+        {% endif %}
+
+        <div class="placa-progress-track">
+            <div class="placa-progress-bar" id="placaProgressBar"></div>
         </div>
     </div>
 
@@ -1140,74 +1116,55 @@ class SlideGeneratorAgent:
             var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
             var rackFocus = document.getElementById('rackFocusLayer');
-            var lowerThird = document.getElementById('floatingLowerThird');
-            var ltHeadline = document.getElementById('ltHeadline');
-            var ltProgressBar = document.getElementById('ltProgressBar');
-            var centralCard = document.getElementById('centralCard');
+            var placaBoard = document.getElementById('fullPlacaBoard');
+            var placaProgressBar = document.getElementById('placaProgressBar');
 
-            var titularApertura = {{ visuals.titular_apertura | tojson }};
-            var remateCierre = {{ visuals.remate | tojson }};
             var estimatedDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
             var activeDuration = estimatedDuration;
-            var isShortMode = (activeDuration <= 8.5);
-            var currentStage = 0; // 1: Apertura, 2: Placa, 3: Remate
+            var currentStage = 0; // 1: Foto Limpia Inicio, 2: Placa Gráfica Completa, 3: Foto Limpia Cierre
             var slideInterval = null;
+            var hasParentUpdates = false;
+            var startTime = performance.now();
 
             function updateTimeline(currentTime, totalDuration) {
                 if (!totalDuration || totalDuration <= 0) return;
                 var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
 
-                if (isShortMode) {
-                    // Modo Flash Directo: Lower third permanente, sin desenfocar la foto
-                    if (ltProgressBar) {
-                        ltProgressBar.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
-                    }
-                    return;
-                }
-
-                // Modo 3 Actos (> 8.5s)
-                // Acto 1 (0% a 30%): Apertura con foto nítida y lower third inicial
-                if (ratio < 0.30) {
+                // FASE 1 (0% a 28%): FOTO 100% LIMPIA con Ken Burns protagonista
+                if (ratio < 0.28) {
                     if (currentStage !== 1) {
                         currentStage = 1;
                         if (rackFocus) rackFocus.classList.remove('active');
-                        if (centralCard) centralCard.classList.remove('visible-stage');
-                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
-                        if (ltHeadline) ltHeadline.textContent = titularApertura;
+                        if (placaBoard) placaBoard.classList.remove('visible-stage');
                     }
-                    var actProgress = ratio / 0.30;
-                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
                 }
-                // Acto 2 (30% a 72%): Rack Focus sobre la foto + Placa Central de Impacto
-                else if (ratio < 0.72) {
+                // FASE 2 (28% a 75%): PLACA GRÁFICA COMPLETA + Rack Focus sobre la foto
+                else if (ratio < 0.75) {
                     if (currentStage !== 2) {
                         currentStage = 2;
-                        if (lowerThird) lowerThird.classList.add('hidden-stage');
                         if (rackFocus) rackFocus.classList.add('active');
-                        if (centralCard) centralCard.classList.add('visible-stage');
+                        if (placaBoard) placaBoard.classList.add('visible-stage');
+                    }
+                    var phaseRatio = (ratio - 0.28) / (0.75 - 0.28);
+                    if (placaProgressBar) {
+                        placaProgressBar.style.width = Math.min(100, Math.round(phaseRatio * 100)) + '%';
                     }
                 }
-                // Acto 3 (72% a 100%): Retorno a la foto nítida + Lower third con remate final
+                // FASE 3 (75% a 100%): RETORNO A FOTO LIMPIA para el remate final
                 else {
                     if (currentStage !== 3) {
                         currentStage = 3;
                         if (rackFocus) rackFocus.classList.remove('active');
-                        if (centralCard) centralCard.classList.remove('visible-stage');
-                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
-                        if (ltHeadline) ltHeadline.textContent = remateCierre;
+                        if (placaBoard) placaBoard.classList.remove('visible-stage');
                     }
-                    var actProgress = (ratio - 0.72) / (1.0 - 0.72);
-                    if (ltProgressBar) ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
                 }
             }
 
             function applyDuration(durSec) {
                 if (!durSec || !isFinite(durSec) || durSec <= 0) return;
                 activeDuration = Math.round(durSec * 10) / 10;
-                isShortMode = (activeDuration <= 8.5);
                 document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
-                // En slides con múltiples fotos, adecuar el tiempo de cada foto proporcionalmente
                 if (slides && slides.length > 1) {
                     var photoDur = Math.round((activeDuration / slides.length) * 10) / 10;
                     document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
@@ -1225,52 +1182,49 @@ class SlideGeneratorAgent:
                 }
             }
 
-            // 1. Escuchar metadata y progreso del audio embebido
+            // 1. Escuchar mensajes del reproductor padre (VideoSection)
+            window.addEventListener('message', function(e) {
+                if (!e.data) return;
+                if ((e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION') && e.data.duration) {
+                    applyDuration(e.data.duration);
+                }
+                if (e.data.type === 'AUDIO_TIME_UPDATE') {
+                    hasParentUpdates = true;
+                    if (e.data.duration && isFinite(e.data.duration) && e.data.duration > 0) {
+                        applyDuration(e.data.duration);
+                    }
+                    var cur = (typeof e.data.currentTime === 'number') ? e.data.currentTime : 0;
+                    updateTimeline(cur, activeDuration);
+                }
+            });
+
+            // 2. Escuchar audio interno si existe
             if (audio) {
-                var syncFromAudio = function() {
+                audio.addEventListener('loadedmetadata', function() {
                     if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
                         applyDuration(audio.duration);
                     }
-                };
-                audio.addEventListener('loadedmetadata', syncFromAudio);
-                audio.addEventListener('durationchange', syncFromAudio);
-                audio.addEventListener('canplay', syncFromAudio);
-                if (audio.readyState >= 1) {
-                    syncFromAudio();
-                }
-
-                audio.addEventListener('timeupdate', function() {
-                    var total = (audio.duration && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : activeDuration;
-                    updateTimeline(audio.currentTime, total);
                 });
-
-                function rafLoop() {
-                    if (!audio.paused && audio.duration > 0) {
+                audio.addEventListener('timeupdate', function() {
+                    if (!hasParentUpdates && audio.duration > 0) {
                         updateTimeline(audio.currentTime, audio.duration);
                     }
-                    requestAnimationFrame(rafLoop);
-                }
-                requestAnimationFrame(rafLoop);
-            } else {
-                // Reloj de respaldo si el slide no cuenta con pista de audio cargada
-                var startTime = Date.now();
-                var fallbackInterval = setInterval(function() {
-                    var elapsed = (Date.now() - startTime) / 1000;
-                    if (elapsed >= activeDuration) {
-                        clearInterval(fallbackInterval);
-                    }
-                    updateTimeline(elapsed, activeDuration);
-                }, 60);
+                });
             }
 
-            // 2. Escuchar postMessage enviado desde el reproductor padre (VideoSection / NewsSlidePlayer)
-            window.addEventListener('message', function(e) {
-                if (e.data && (e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION')) {
-                    if (e.data.duration) {
-                        applyDuration(e.data.duration);
+            // 3. Reloj autónomo infalible de respaldo (garantiza que NUNCA se congele)
+            function autonomousLoop(now) {
+                if (!hasParentUpdates) {
+                    if (audio && !audio.paused && audio.duration > 0) {
+                        updateTimeline(audio.currentTime, audio.duration);
+                    } else {
+                        var elapsed = (now - startTime) / 1000;
+                        updateTimeline(elapsed % (activeDuration + 0.1), activeDuration);
                     }
                 }
-            });
+                requestAnimationFrame(autonomousLoop);
+            }
+            requestAnimationFrame(autonomousLoop);
 
             // Inicialización de rotación proporcional si hay múltiples fotos
             if (slides && slides.length > 1 && !slideInterval) {
@@ -1310,10 +1264,10 @@ class SlideGeneratorAgent:
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
             html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
-            html = html.replace("{{ visuals.titular_apertura | tojson }}", json.dumps(visuals.get("titular_apertura", title)))
-            html = html.replace("{{ visuals.remate | tojson }}", json.dumps(visuals.get("remate", "Más detalles en saladillovivo.com.ar")))
             html = html.replace("{{ visuals.kicker }}", visuals.get("kicker", "SALADILLO VIVO"))
-            html = html.replace("{{ visuals.titular_apertura }}", visuals.get("titular_apertura", title))
+            html = html.replace("{{ visuals.placa.destacado }}", str(visuals.get("placa", {}).get("destacado", title)))
+            html = html.replace("{{ visuals.placa.bajada }}", str(visuals.get("placa", {}).get("bajada", "")))
+            html = html.replace("{{ visuals.placa.titulo }}", str(visuals.get("placa", {}).get("titulo", "INFORMACIÓN")))
             return html
 
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:

@@ -551,6 +551,19 @@ const VideoSection: React.FC = () => {
                   } catch (err) {}
                 }
               }}
+              onTimeUpdate={(e) => {
+                const el = e.currentTarget;
+                try {
+                  const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
+                  if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                      type: 'AUDIO_TIME_UPDATE',
+                      currentTime: el.currentTime,
+                      duration: el.duration || 0
+                    }, '*');
+                  }
+                } catch (err) {}
+              }}
               onEnded={() => {
                 if (isHtmlSlideActive || isNewsSlide || isNewsImageAudio) {
                   stopSlide();

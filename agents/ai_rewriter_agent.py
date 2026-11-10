@@ -400,37 +400,52 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
         clean_title = re.sub(r'[\r\n]+', ' ', title).strip()
         words = clean_title.split()
         titular_apertura = " ".join(words[:10]).rstrip(' ,.:;')
+        full_context = f"{clean_title}. {content}"
 
-        # Buscar si hay citas textuales
-        quote_match = re.search(r'["“]([^"”]{15,120})["”]', content)
-        # Buscar si hay cifras o números de impacto
-        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones|mil)?|\d+\s*(?:millones|cuadras|viviendas|hectáreas|alumnos|casos|efectivos|%))', content, re.IGNORECASE)
+        # Buscar si hay citas textuales en título o cuerpo
+        quote_match = re.search(r'["“]([^"”]{12,140})["”]', full_context)
+        # Buscar si hay cifras o números de impacto con fidelidad monetaria y numérica
+        stat_match = re.search(r'(\$\s*\d+[\d\.,]*\s*(?:millones?|mil|pesos|dólares)?|\b\d+[\d\.,]*\s*(?:millones?|cuadras?|viviendas?|hectáreas?|alumnos?|casos|efectivos|%|km)\b)', full_context, re.IGNORECASE)
 
         if quote_match:
             tipo_placa = "CITA"
+            # Identificar posible emisor
+            author = "DECLARACIÓN EN SALADILLO VIVO"
+            if re.search(r'salom[oó]n|intendente', full_context, re.I):
+                author = "JOSÉ LUIS SALOMÓN | INTENDENTE"
+            elif re.search(r'comisar|polic', full_context, re.I):
+                author = "AUTORIDADES POLICIALES"
+            elif re.search(r'hospital|salud|director|m[eé]dic', full_context, re.I):
+                author = "AUTORIDADES DE SALUD"
+
             placa = {
-                "titulo": "DECLARACIÓN",
+                "titulo": "DECLARACIÓN DESTACADA",
                 "destacado": f'"{quote_match.group(1).strip()}"',
-                "bajada": "Testimonio en Saladillo Vivo"
+                "bajada": author
             }
         elif stat_match:
             tipo_placa = "DATO_NUMERICO"
+            # Contexto de bajada fidedigno basado en el título real de la noticia
+            bajada_stat = clean_title
+            if len(bajada_stat) > 75:
+                bajada_stat = bajada_stat[:72].rsplit(' ', 1)[0] + '...'
+
             placa = {
                 "titulo": "CIFRA DESTACADA",
                 "destacado": stat_match.group(1).upper().strip(),
-                "bajada": "Dato central del informe periodístico"
+                "bajada": bajada_stat
             }
         else:
             tipo_placa = "RESUMEN"
-            # Tomar una oración representativa del cuerpo
+            # Extraer síntesis fiel del primer párrafo relevante
             sentences = [s.strip() for s in re.split(r'[\.\n]+', content) if len(s.strip()) > 25]
-            summary_text = sentences[0] if sentences else titular_apertura
+            summary_text = sentences[0] if sentences else clean_title
             if len(summary_text) > 85:
                 summary_text = summary_text[:82].rsplit(' ', 1)[0] + '...'
             placa = {
-                "titulo": "SÍNTESIS",
-                "destacado": summary_text,
-                "bajada": "Cobertura especial Saladillo Vivo"
+                "titulo": "SÍNTESIS DE LA NOTICIA",
+                "destacado": clean_title,
+                "bajada": summary_text
             }
 
         # Remate de cierre
