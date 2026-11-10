@@ -28,19 +28,15 @@ const NewsCard: React.FC<NewsCardProps> = ({ newsItem, index = 0, className = ''
   if (!newsItem) return null;
 
   const rawTitle = newsItem.title || newsItem.titulo;
-    // Limpieza común (pipes/barras/espacios dobles) sin recorte de palabras
-    const cleanFull = (t: string | null | undefined) =>
-      (t || '').replace(/[\\|]/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase();
+  // Limpieza común (pipes/barras/espacios dobles/comillas dobles y tipográficas) sin recorte de palabras
+  const cleanFull = (t: string | null | undefined) =>
+    (t || '').replace(/[\\|]/g, '').replace(/[¨"'“”‘’«»]/g, '').replace(/\s{2,}/g, ' ').trim().toUpperCase();
 
-    const ganchoImagen = newsItem.titulo_gancho_imagen;
-    // Noticia destacada: título COMPLETO sobre la imagen; el límite visual real
-    // lo da line-clamp-3 (hasta 3 líneas). No recortar a 8 palabras: corta frases al medio.
-    // Tarjetas estándar: mantener gancho corto de 8 palabras (poco espacio disponible).
-    const title = isFeatured
-      ? (cleanFull(rawTitle) || cleanFull(ganchoImagen))
-      : (ganchoImagen
-          ? cleanFull(ganchoImagen).split(' ').slice(0, 8).join(' ')
-          : cleanFull(rawTitle).split(' ').slice(0, 8).join(' '));
+  const ganchoImagen = newsItem.titulo_gancho_imagen;
+  // Tanto en noticia destacada como en tarjetas de la grilla se muestra el título COMPLETO.
+  // El control visual seguro lo garantiza line-clamp-3 y la tipografía responsiva fluida (cqw).
+  // Nunca recortar por conteo ciego de palabras, ya que amputa oraciones al medio.
+  const title = cleanFull(rawTitle) || cleanFull(ganchoImagen);
 
   const finalImageUrl = getHighResolutionImageUrl(newsItem.image_url || newsItem.imageUrl);
   

@@ -163,7 +163,7 @@ const ExclusiveVideoCarousel: React.FC<ExclusiveVideoCarouselProps> = ({ videos,
                 />
                 <div className={titleOverlayClasses}>
                   <p className={cn(
-                    "text-white font-thin uppercase leading-tight break-words",
+                    "text-white font-thin uppercase leading-tight break-words line-clamp-2 text-center",
                     (video.nombre || '').length > 70 ? "text-[10px]" : ((video.nombre || '').length > 40 ? "text-[11px]" : "text-xs")
                   )}>{video.nombre}</p>
                 </div>
