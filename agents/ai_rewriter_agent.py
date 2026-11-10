@@ -465,6 +465,60 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             "remate": remate
         }
 
+    def _condense_body_cleanly(self, full_text: str, target_words: int = 105) -> str:
+        """
+        Condensa el cuerpo de la noticia respetando límites de oraciones COMPLETAS.
+        Garantiza que la locución llegue al final natural del relato con sentido gramatical
+        y nunca quede truncada a mitad de frase antes de la frase de promoción.
+        """
+        if not full_text:
+            return ""
+
+        # Dividir en oraciones completas terminadas en punto o signos
+        raw_sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', full_text) if s.strip()]
+        if not raw_sentences:
+            raw_sentences = [full_text.strip()]
+
+        # Si el texto original no terminaba con puntuación (.!?), la última parte venía trunca
+        if not full_text.strip().endswith(('.', '!', '?')) and len(raw_sentences) > 1:
+            raw_sentences.pop()
+
+        accumulated = []
+        current_word_count = 0
+
+        for sent in raw_sentences:
+            sent_words = sent.split()
+            # Si acumular esta oración se mantiene dentro de un rango periodístico saludable (~115 palabras)
+            if current_word_count + len(sent_words) <= target_words + 15:
+                accumulated.append(sent)
+                current_word_count += len(sent_words)
+            else:
+                # Si ya tenemos un cuerpo informativo sólido (>= 60 palabras), cerramos en la oración anterior
+                if current_word_count >= 60:
+                    break
+                accumulated.append(sent)
+                current_word_count += len(sent_words)
+                break
+
+        result = " ".join(accumulated).strip()
+
+        # Limpiar palabras o conectores que hayan quedado colgando al final de una frase
+        dangling_endings = (
+            'que', 'y', 'e', 'o', 'u', 'de', 'del', 'el', 'la', 'los', 'las',
+            'con', 'en', 'por', 'para', 'se', 'su', 'sus', 'informó', 'dijo',
+            'afirmó', 'aseguró', 'señaló', 'manifestó', 'destacó', 'agregó', 'va'
+        )
+        tokens = result.split()
+        while tokens and tokens[-1].lower().rstrip(' ,.:;—“”"\'') in dangling_endings:
+            tokens.pop()
+            result = " ".join(tokens)
+
+        result = result.rstrip(' ,;:—')
+        if not result.endswith(('.', '!', '?')):
+            result += "."
+
+        return result
+
     def local_heuristic_fallback(self, title, content):
         """
         Fallback editorial algorítmico local en caso de ausencia de API Keys o error de red.
@@ -480,13 +534,9 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
             paragraphs = [content.strip() or clean_title]
 
         lead = paragraphs[0]
-        # Acotar desarrollo para duración óptima en locución (80 a 110 palabras ~35-45s)
+        # Acotar desarrollo para duración óptima en locución preservando oraciones completas
         full_text = f"{lead} " + " ".join(paragraphs[1:])
-        text_words = full_text.split()
-        if len(text_words) > 105:
-            condensed_body = " ".join(text_words[:105]).rstrip(' ,;:') + "."
-        else:
-            condensed_body = full_text
+        condensed_body = self._condense_body_cleanly(full_text, target_words=105)
 
         meta_desc = (lead[:150] + "...") if len(lead) > 150 else lead
 

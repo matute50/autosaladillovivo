@@ -52,14 +52,20 @@ def main():
     rows = resp.json() or []
     print(f"🔄 Artículos a regenerar: {len(rows)} (últimos {DAYS} días)")
 
+    from agents.ai_rewriter_agent import AiRewriterAgent
+    rewriter = AiRewriterAgent()
+
     ok = 0
     for i, row in enumerate(rows, 1):
         art_id = row["id"]
         title = row.get("title") or ""
-        text = row.get("text") or ""
-        if not text:
+        raw_text = row.get("text") or ""
+        if not raw_text:
             print(f"  [{i}/{len(rows)}] id={art_id} sin texto, omito")
             continue
+
+        # Asegurar que el cuerpo de la noticia concluya oraciones completas antes de locutar
+        text = rewriter._condense_body_cleanly(raw_text, target_words=105)
 
         print(f"  [{i}/{len(rows)}] id={art_id} «{title[:48]}…»")
         audio_url = audio.process_article_audio(
@@ -90,6 +96,8 @@ def main():
             print(f"    ⚠️ slide falló: {type(e).__name__}: {e}")
 
         patch = {"audio_url": audio_url}
+        if text != raw_text:
+            patch["text"] = text
         if dur:
             patch["animation_duration"] = dur
         if slide_url:

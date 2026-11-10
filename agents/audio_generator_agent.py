@@ -609,34 +609,40 @@ class AudioGeneratorAgent:
 
     def _find_seam_silence(self, seg):
         """
-        Ubica el silencio que separa la noticia de la promo dentro de una
-        sintesis CONTINUA. La promo ocupa el tramo final del audio, asi que el
-        empalme es la pausa mas marcada cuya cola cae en el ultimo tramo.
+        Ubica el silencio que separa la noticia de la promo dentro de una síntesis CONTINUA.
+        La promo institucional se ubica estrictamente al final y dura entre 1.3s y 5.0s.
+        Para proteger la integridad del cuerpo de la noticia y evitar que se corte antes
+        de tiempo, selecciona el ÚLTIMO silencio previo al tramo final de la promo.
         Devuelve (gap_start_ms, gap_end_ms) o None si no es fiable.
         """
         from pydub.silence import detect_nonsilent
         total = len(seg)
         try:
-            blocks = detect_nonsilent(seg, min_silence_len=150,
-                                       silence_thresh=seg.dBFS - 16, seek_step=10)
+            blocks = detect_nonsilent(seg, min_silence_len=120,
+                                      silence_thresh=seg.dBFS - 16, seek_step=10)
         except Exception:
             return None
         if len(blocks) < 2:
             return None
-        tail_limit = min(int(total * 0.5), 9000)
-        best = None  # (gap_dur, gap_start, gap_end)
+
+        # La promo institucional dura típicamente entre 1.3s y 5.0s
         prev_end = blocks[0][1]
+        gaps = []
         for (a, b) in blocks[1:]:
             gap_start, gap_end = prev_end, a
             gap = gap_end - gap_start
             promo_len = total - gap_end
-            in_tail = gap_start >= total - tail_limit
-            plausible_promo = 1200 <= promo_len <= 8500
-            if in_tail and gap >= 150 and plausible_promo:
-                if best is None or gap > best[0]:
-                    best = (gap, gap_start, gap_end)
+            if 1300 <= promo_len <= 5000 and gap >= 120:
+                gaps.append((gap_start, gap_end, gap, promo_len))
             prev_end = b
-        return (best[1], best[2]) if best else None
+
+        if not gaps:
+            return None
+
+        # Tomamos el último gap (el más cercano al final), asegurando que todo el cuerpo
+        # anterior quede completo e intacto.
+        last_gap = gaps[-1]
+        return (last_gap[0], last_gap[1])
 
     def _splice_exact_pause(self, combined_bytes: bytes, pause_ms: int = 1000) -> Optional[bytes]:
         """
