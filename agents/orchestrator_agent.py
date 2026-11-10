@@ -21,6 +21,7 @@ Características:
 import os
 import sys
 import json
+import re
 import time
 import hashlib
 import logging
@@ -241,11 +242,9 @@ class OrchestratorAgent:
                             logger.warning(f"  [QA-Paso2] No se pudo reparar article={art.get('id')} problema de imagen: {[i['message'] for i in qa_res.issues if i['field']=='image_url']}")
 
         if not articles_to_process:
-            if duplicate_articles:
-                logger.info("ℹ️ No se publicaron notas nuevas: todas las candidatas ya fueron tratadas o son actualizaciones menores.")
             save_article_state(DATA_DIR, article_state, processed_articles=processed_for_state, duplicate_articles=duplicate_articles)
-            logger.warning("⚠️ No se pudieron registrar artículos en la base de datos.")
-            return False
+            logger.info("ℹ️ Ciclo vacío: ningún artículo nuevo para procesar.")
+            return True
 
         # ----------------------------------------------------------------------
         # PASO 3: MODIFICAR TÍTULO Y TEXTO CON IA
@@ -326,7 +325,6 @@ class OrchestratorAgent:
                     image_urls = [u for u in raw_gallery if u and isinstance(u, str) and u.startswith('http')]
                 elif isinstance(raw_gallery, str) and raw_gallery.startswith('['):
                     try:
-                        import json
                         parsed_imgs = json.loads(raw_gallery)
                         image_urls = [u for u in parsed_imgs if u and isinstance(u, str) and u.startswith('http')]
                     except Exception:

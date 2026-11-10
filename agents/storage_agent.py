@@ -213,7 +213,10 @@ class StorageAgent:
         }
 
         if ai_data:
-            title = ai_data.get('titulo_radial') or ai_data.get('titulo_ia') or ai_data.get('title')
+            # Conservar el título ORIGINAL completo en el campo 'title'
+            original_title = ai_data.get('title', '')
+            # `titulo_radial` es el resumen para audio (máx. 12 palabras)
+            radial_title = ai_data.get('titulo_radial') or ai_data.get('titulo_ia')
             content = ai_data.get('contenido_ia') or ai_data.get('text')
             description = ai_data.get('meta_description') or ai_data.get('description')
             feature_status = ai_data.get('featureStatus') or 'secondary'
@@ -221,9 +224,11 @@ class StorageAgent:
             raw_keywords = ai_data.get('meta_keywords') or ai_data.get('palabras_clave') or []
             keywords_str = ', '.join(raw_keywords) if isinstance(raw_keywords, list) else str(raw_keywords)
 
-            if title:
-                patch_payload['title'] = title
-                patch_payload['meta_title'] = title
+            if original_title:
+                patch_payload['title'] = original_title
+                patch_payload['meta_title'] = original_title
+            if radial_title:
+                patch_payload['titulo_radial'] = radial_title
             if content:
                 patch_payload['text'] = content
             if description:
@@ -239,9 +244,9 @@ class StorageAgent:
             hook_title = ai_data.get('titulo_gancho_imagen') or ai_data.get('titulo_gancho')
             if hook_title:
                 patch_payload['titulo_gancho_imagen'] = hook_title
-            radial_title = ai_data.get('titulo_radial')
-            if radial_title:
-                patch_payload['titulo_radial'] = radial_title
+        else:
+            original_title = ''
+            radial_title = ''
 
         final_audio_url = audio_url or (ai_data.get('audio_url') if ai_data else None)
         final_slide_url = slide_url or (ai_data.get('url_slide') or ai_data.get('slide_url') if ai_data else None)
@@ -276,7 +281,7 @@ class StorageAgent:
             if resp.status_code in (200, 204):
                 audio_tag = f" | Audio: [OK]" if final_audio_url else ""
                 slide_tag = f" | Slide: [OK]" if final_slide_url else ""
-                print(f"  [StorageAgent] [Paso 5: Actualizado en BD con IA{audio_tag}{slide_tag}] ID: {article_id} | Titulo: \"{title[:40]}...\"")
+                print(f"  [StorageAgent] [Paso 5: Actualizado en BD con IA{audio_tag}{slide_tag}] ID: {article_id} | Titulo: \"{(original_title or radial_title or '')[:40]}...\"")
                 try:
                     res_json = resp.json()
                     return res_json[0] if (isinstance(res_json, list) and len(res_json) > 0) else current_payload
