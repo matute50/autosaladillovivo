@@ -1,0 +1,34 @@
+{
+  "_descripcion": "Glosario de Saladillo Vivo para correcciones en redacción de textos (publicación web/slides) y fonética de audios (TTS)",
+  "redaccion": {
+    "Salomon": "Salomón",
+    "hcd": "HCD",
+    "ces": "CES",
+    "caps": "CAPS",
+    "udc": "UDC",
+    "curs": "CURS",
+    "saladillense": "saladillense"
+  },
+  "audio": {
+    "CES": "C-E-S",
+    "C.E.S.": "C-E-S",
+    "HCD": "Ache-Ce-De",
+    "H.C.D.": "Ache-Ce-De",
+    "CURS": "Curs",
+    "CAPS": "Caps",
+    "Cicaré": "Sicaré",
+    "Delía": "De-lía",
+    "Salomón": "Salomón",
+    "WhatsApp": "uatsap",
+    "Facebook": "feisbuc",
+    "Instagram": "instagran",
+    "Twitter": "tuíter",
+    "streaming": "stríming",
+    "online": "onláin"
+  },
+  "ambos": {
+    "Saladillo vivo": "Saladillo Vivo",
+    "saladillo vivo": "Saladillo Vivo",
+    "saladillo": "Saladillo"
+  }
+}

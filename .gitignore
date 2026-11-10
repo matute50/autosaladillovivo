@@ -5,6 +5,7 @@ check_gcp_tts.mp3
 /coverage
 data/audios/
 data/*.json
+!data/glossary.json
 data/slides/
 data/weather_cache.json
 # debug

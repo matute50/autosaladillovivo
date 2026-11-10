@@ -241,6 +241,12 @@ class AudioGeneratorAgent:
         clean = re.sub(r'\s+', ' ', clean)
         # Remover caracteres no legibles (permitir acentos y ñ)
         clean = re.sub(r'[^\w\s\.,;:¡!¿?\-\'"áéíóúÁÉÍÓÚñÑ]', '', clean)
+        # Aplicar Glosario Fonético de Audio (data/glossary.json)
+        try:
+            from utils.glossary_manager import apply_audio_glossary
+            clean = apply_audio_glossary(clean)
+        except Exception:
+            pass
         return clean.strip()
 
     def next_voice(self) -> str:

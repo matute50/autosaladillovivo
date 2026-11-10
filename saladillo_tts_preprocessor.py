@@ -1,10 +1,15 @@
 import re
+try:
+    from utils.glossary_manager import apply_audio_glossary
+except ImportError:
+    apply_audio_glossary = lambda t: t
 
 def preprocess_rioplatense(text: str) -> str:
     if not text:
         return ""
 
-    processed = text
+    # Aplicar glosario fonético antes de las transformaciones fonéticas
+    processed = apply_audio_glossary(text)
 
     # Yeísmo / Sheísmo (ll → sh, y → sh), cubriendo mayúsculas iniciales
     # ("Llegó" → "Shegó", "Yuyo" → "Shuyo")

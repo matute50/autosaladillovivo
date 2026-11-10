@@ -319,7 +319,14 @@ def adapt_text_for_tts(text: str, final_pause: bool = True) -> str:
     """
     if not text:
         return ""
-    texto = " ".join(text.split())
+
+    try:
+        from utils.glossary_manager import apply_audio_glossary
+        texto = apply_audio_glossary(text)
+    except Exception:
+        texto = text
+
+    texto = " ".join(texto.split())
     texto = _abreviaturas_a_palabras(texto)
     texto = _expandir_moneda(texto)
     texto = _expandir_porcentajes(texto)

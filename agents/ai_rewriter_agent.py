@@ -659,12 +659,36 @@ RESPONDE EXCLUSIVAMENTE CON UN OBJETO JSON VÁLIDO CON ESTA ESTRUCTURA EXACTA:
                 ai_result.get('contenido_optimizado', content)
             )
 
+        # Aplicar Glosario Centralizado de Redacción (data/glossary.json)
+        try:
+            from utils.glossary_manager import apply_text_glossary
+            final_titulo = apply_text_glossary(ai_result.get('titulo_radial', title))
+            final_gancho = apply_text_glossary(ai_result.get('titulo_gancho_imagen', ''))
+            final_contenido = apply_text_glossary(ai_result.get('contenido_optimizado', content))
+            final_meta = apply_text_glossary(meta_desc)
+            if isinstance(slide_visuals, dict):
+                if slide_visuals.get('titular_apertura'):
+                    slide_visuals['titular_apertura'] = apply_text_glossary(slide_visuals['titular_apertura'])
+                if slide_visuals.get('remate'):
+                    slide_visuals['remate'] = apply_text_glossary(slide_visuals['remate'])
+                if isinstance(slide_visuals.get('placa'), dict):
+                    if slide_visuals['placa'].get('destacado'):
+                        slide_visuals['placa']['destacado'] = apply_text_glossary(slide_visuals['placa']['destacado'])
+                    if slide_visuals['placa'].get('bajada'):
+                        slide_visuals['placa']['bajada'] = apply_text_glossary(slide_visuals['placa']['bajada'])
+        except Exception as e:
+            print(f"    [AiRewriterAgent] Aviso: no se pudo aplicar glosario de redacción: {e}")
+            final_titulo = ai_result.get('titulo_radial', title)
+            final_gancho = ai_result.get('titulo_gancho_imagen', '')
+            final_contenido = ai_result.get('contenido_optimizado', content)
+            final_meta = meta_desc
+
         return {
-            'titulo_ia': ai_result.get('titulo_radial', title),          # Título radial (hasta 12 palabras)
-            'titulo_gancho_imagen': ai_result.get('titulo_gancho_imagen', ''),  # Gancho imagen (máx 6 palabras)
-            'contenido_ia': ai_result.get('contenido_optimizado', content),
+            'titulo_ia': final_titulo,          # Título radial (hasta 12 palabras)
+            'titulo_gancho_imagen': final_gancho,  # Gancho imagen (máx 6 palabras)
+            'contenido_ia': final_contenido,
             'tono': _tono_raw,
-            'meta_description': meta_desc,
+            'meta_description': final_meta,
             'meta_keywords': ai_result.get('palabras_clave', ['Saladillo']),
             'slide_visuals': slide_visuals,
             'featureStatus': feature_status,
