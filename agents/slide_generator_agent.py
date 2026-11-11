@@ -904,7 +904,11 @@ class SlideGeneratorAgent:
             }]
 
         total_photos = len(images) if images else 1
-        photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
+        # SegmentCount = N fotos + 1 segmento extra para el retorno final a la imagen principal.
+        # La rotación es [principal, foto2, ..., fotoN, principal], así el slide empieza y
+        # termina siempre en la imagen principal. duration por segmento = audio / (N+1).
+        segment_count = total_photos + 1
+        photo_duration = round(audio_duration / segment_count, 1) if total_photos > 1 else audio_duration
 
         template_str = """<!DOCTYPE html>
 <html lang="es">
@@ -996,8 +1000,14 @@ class SlideGeneratorAgent:
             backface-visibility: hidden;
             transform: translateZ(0);
             will-change: transform;
-            /* Ken Burns: usar --kb-speed (0.7) para suavizar el zoom por foto */
-            animation: {% if images and images | length > 1 %}kenBurnsPhoto calc(var(--slide-photo-duration, 15s) * var(--kb-speed, 0.7)){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
+        }
+
+        /* Animaciones Ken Burns unidireccionales asignadas por clase de fotograma */
+        .photo-slide.kb-zoomin .photo-main {
+            animation: kenBurnsZoomIn var(--slide-photo-duration, 4s) ease-out forwards;
+        }
+        .photo-slide.kb-zoomout .photo-main {
+            animation: kenBurnsZoomOut var(--slide-photo-duration, 4s) ease-out forwards;
         }
 
         /* BANNERS / AFICHES */
@@ -1012,9 +1022,12 @@ class SlideGeneratorAgent:
             100% { transform: scale(1.0); }
         }
 
-        @keyframes kenBurnsPhoto {
+        @keyframes kenBurnsZoomIn {
             0% { transform: scale(1.0); }
-            50% { transform: scale(1.22); }
+            100% { transform: scale(1.22); }
+        }
+        @keyframes kenBurnsZoomOut {
+            0% { transform: scale(1.22); }
             100% { transform: scale(1.0); }
         }
 
@@ -1182,7 +1195,7 @@ class SlideGeneratorAgent:
 <body>
     <div class="fullscreen-container" id="slideshowContainer">
         {% for img in images %}
-        <div class="photo-slide {% if loop.first %}active{% endif %} {% if img.is_banner %}is-banner{% endif %}">
+        <div class="photo-slide {% if loop.first %}active{% endif %} {% if loop.index0 % 2 == 0 %}kb-zoomin{% else %}kb-zoomout{% endif %} {% if img.is_banner %}is-banner{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
             <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
@@ -1235,8 +1248,15 @@ class SlideGeneratorAgent:
             // Se mantienen FUERA de applyDuration para que los mensajes AUDIO_TIME_UPDATE
             // del padre (frecuentes, ~cada 250ms) NO reinicien el contador ni congelen la
             // rotación. photoDurMs se actualiza en applyDuration sin recrear el timer.
+            // Orden: [principal, ...fotos intermedias, principal] → el slide empieza y termina
+            // siempre con la imagen principal (índice 0). duration = total / (N+1).
             var currentPhotoIndex = 0;
-            var photoDurMs = Math.round((baseDuration / (slides.length || 1)) * 1000);
+            var rotationOrder = [];
+            for (var _ri = 0; _ri < slides.length; _ri++) { rotationOrder.push(_ri); }
+            rotationOrder.push(0); // volver a la imagen principal al final
+            var nextRotationIndex = 1; // ya estamos en el índice 0, siguiente avance = 1
+            var segmentCount = slides.length + 1;
+            var photoDurMs = Math.round((baseDuration / segmentCount) * 1000);
             var lastPhotoTick = performance.now();
 
             // Si corre dentro del iframe de VideoSection, espera a que termine la animación NOTICIAS.
@@ -1331,13 +1351,12 @@ class SlideGeneratorAgent:
                 document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
                 if (slides && slides.length > 1) {
-                    var photoDur = Math.round((activeDuration / slides.length) * 10) / 10;
-                    document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
-                    // Reducir velocidad Ken Burns a 70% del tiempo por foto para un ciclo suave
-                    document.documentElement.style.setProperty('--kb-speed', '0.7');
-                    // Solo actualiza la duración por foto; el timer de rotación es persistente
-                    // (tick de 100ms) y NO se recrea aquí para no reiniciar la galería.
-                    photoDurMs = Math.round(photoDur * 1000);
+                    // SegmentCount = N fotos + 1 segmento extra para volver a la principal al final
+                    var perSegment = Math.round((activeDuration / segmentCount) * 10) / 10;
+                    document.documentElement.style.setProperty('--slide-photo-duration', perSegment + 's');
+                    // Sin --kb-speed: cada foto tiene un solo movimiento (zoom in o zoom out)
+                    // durante todo su segmento, calibrado por duración real.
+                    photoDurMs = Math.round(perSegment * 1000);
                     if (photoDurMs < 500) photoDurMs = 500;
                 } else {
                     document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
@@ -1349,11 +1368,10 @@ class SlideGeneratorAgent:
                 renderLine(0);
             }
 
-            // Auto-iniciar rotación de fotos: se aplica la duración base y se arranca un
-            // tick persistente de 100ms que mide el tiempo REAL transcurrido por foto.
-            // A diferencia de un setInterval recreado en cada applyDuration, este tick
-            // NO puede ser reiniciado por los AUDIO_TIME_UPDATE del padre (que llegan cada
-            // ~250ms), por lo que la galería avanza siempre y no queda congelada en la foto 1.
+            // Auto-iniciar rotación de fotos: tick persistente de 100ms que recorre el orden
+            // [principal, foto2, foto3, ..., principal]. El timer NO puede ser reiniciado por
+            // AUDIO_TIME_UPDATE del padre (~cada 250ms), así que la galería avanza siempre.
+            // Al finalizar el último segmento (volver a la principal) el timer se detiene.
             if (slides && slides.length > 1) {
                 applyDuration(baseDuration);
             }
@@ -1361,10 +1379,28 @@ class SlideGeneratorAgent:
                 slideInterval = setInterval(function() {
                     var now = performance.now();
                     if (now - lastPhotoTick >= photoDurMs) {
-                        slides[currentPhotoIndex].classList.remove('active');
-                        currentPhotoIndex = (currentPhotoIndex + 1) % slides.length;
-                        slides[currentPhotoIndex].classList.add('active');
-                        lastPhotoTick = now;
+                        if (nextRotationIndex < rotationOrder.length) {
+                            // Desactivar la foto actual
+                            slides[currentPhotoIndex].classList.remove('active');
+                            // Activar la siguiente según rotationOrder
+                            currentPhotoIndex = rotationOrder[nextRotationIndex];
+                            slides[currentPhotoIndex].classList.add('active');
+                            nextRotationIndex++;
+                            lastPhotoTick = now;
+
+                            // Reiniciar animación Ken Burns al re-activar (evita que la animación
+                            // continúe desde el progreso previo en lugar de arrancar fresh).
+                            var mainImg = slides[currentPhotoIndex].querySelector('.photo-main');
+                            if (mainImg && mainImg.style.animation) {
+                                mainImg.style.animation = 'none';
+                                void mainImg.offsetHeight;
+                                mainImg.style.animation = '';
+                            }
+                        } else {
+                            // Orden completado: detener el timer. La última foto activa será la
+                            // imagen principal (rotationOrder[rotationOrder.length-1] === 0).
+                            clearInterval(slideInterval);
+                        }
                     }
                 }, 100);
             }

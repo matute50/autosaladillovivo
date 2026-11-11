@@ -152,15 +152,22 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertIn("transition: opacity 1.5s ease-in-out", html)
         self.assertIn(".photo-slide.active", html)
 
-        # 3. Tiempo por foto = duración total / cantidad de fotos
-        #    En el CSS: --slide-photo-duration: 9.0s (36/4)
-        self.assertIn("--slide-photo-duration: 9.0s", html)
-        #    En el JS: rotación robusta con tick persistente de 100ms que mide el
-        #    tiempo real transcurrido (photoDurMs = round(photoDur*1000) = 9000),
-        #    para que los AUDIO_TIME_UPDATE del padre NO reinicien ni congelen la galería.
-        self.assertIn("photoDurMs = Math.round(photoDur * 1000)", html)
-        self.assertIn("(currentPhotoIndex + 1) % slides.length", html)
-        self.assertIn("}, 100);", html)
+        # 3. Tiempo por segmento = duración total / (cantidad_de_fotos + 1).
+        #    Se suma +1 porque el orden de rotación es [principal, …, principal]:
+        #    N fotos intermedias + retorno final a la imagen principal al cerrar.
+        #    CSS: --slide-photo-duration: 7.2s (36/5)
+        self.assertIn("--slide-photo-duration: 7.2s", html)
+        #    El JS define: rotationOrder = [0,1,2,3,0], nextRotationIndex=1,
+        #    photoDurMs = round((baseDuration/segmentCount)*1000), sin usar módulo.
+        self.assertIn("rotationOrder.push(0);", html)
+        self.assertIn("var segmentCount = slides.length + 1;", html)
+        self.assertIn("nextRotationIndex", html)
+        self.assertNotIn("% slides.length", html)
+        #    Reinicio de Ken Burns al volver a activar cada foto (reflow con offsetHeight)
+        self.assertIn("mainImg.offsetHeight", html)
+        #    Cada .photo-slide tiene clase kb-zoomin o kb-zoomout según posición par/impar
+        self.assertIn("kb-zoomin", html)
+        self.assertIn("kb-zoomout", html)
 
     def test_single_photo_uses_full_audio_duration(self):
         """Con una sola foto, el tiempo por foto es la duración completa del audio."""
