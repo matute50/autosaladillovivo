@@ -1002,13 +1002,10 @@ class SlideGeneratorAgent:
             will-change: transform;
         }
 
-        /* Animaciones Ken Burns unidireccionales asignadas por clase de fotograma */
-        .photo-slide.kb-zoomin .photo-main {
-            animation: kenBurnsZoomIn var(--slide-photo-duration, 4s) ease-out forwards;
-        }
-        .photo-slide.kb-zoomout .photo-main {
-            animation: kenBurnsZoomOut var(--slide-photo-duration, 4s) ease-out forwards;
-        }
+        /* Animaciones Ken Burns unidireccionales. Se aplican de forma INLINE vía JS
+           (activatePhoto) sólo a la foto ACTIVA, en el instante de activarse, para que
+           el movimiento arranque cuando la foto es visible y no se agote antes (lo que
+           dejaría imágenes fijas). Los keyframes están abajo. */
 
         /* BANNERS / AFICHES */
         .photo-slide.is-banner .photo-main {
@@ -1350,6 +1347,7 @@ class SlideGeneratorAgent:
                 activeDuration = Math.round(durSec * 10) / 10;
                 document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
+                var prevPhotoDurMs = photoDurMs;
                 if (slides && slides.length > 1) {
                     // SegmentCount = N fotos + 1 segmento extra para volver a la principal al final
                     var perSegment = Math.round((activeDuration / segmentCount) * 10) / 10;
@@ -1358,6 +1356,14 @@ class SlideGeneratorAgent:
                     // durante todo su segmento, calibrado por duración real.
                     photoDurMs = Math.round(perSegment * 1000);
                     if (photoDurMs < 500) photoDurMs = 500;
+
+                    // Si la duración por segmento cambió de verdad (llega la duración real del
+                    // padre), re-aplicar la animación Ken Burns de la foto activa con el nuevo
+                    // timing. Se compara contra el valor previo para NO reiniciar la animación
+                    // en cada AUDIO_TIME_UPDATE (~250ms) con la misma duración.
+                    if (typeof activatePhoto === 'function' && prevPhotoDurMs !== photoDurMs) {
+                        activatePhoto(currentPhotoIndex);
+                    }
                 } else {
                     document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
                 }
@@ -1368,34 +1374,45 @@ class SlideGeneratorAgent:
                 renderLine(0);
             }
 
+            // Aplica la clase 'active' y la animación Ken Burns INLINE únicamente a la foto
+            // indicada. Es clave reiniciar vía reflow (animation:none + offsetHeight) para que
+            // el movimiento arranque en el momento de activarse y no se agote antes: si la
+            // animación estuviera en CSS estática, todas las fotos la arrancarían al cargar
+            // el documento y, al llegar la rotación, ya estarían sin movimiento (imágenes fijas).
+            function activatePhoto(idx) {
+                for (var _a = 0; _a < slides.length; _a++) {
+                    if (_a !== idx) slides[_a].classList.remove('active');
+                }
+                slides[idx].classList.add('active');
+                var mainImg = slides[idx].querySelector('.photo-main');
+                if (mainImg) {
+                    var kbName = (idx % 2 === 0) ? 'kenBurnsZoomIn' : 'kenBurnsZoomOut';
+                    var kbDur = (photoDurMs / 1000) + 's';
+                    mainImg.style.animation = 'none';
+                    void mainImg.offsetHeight; // forzar reflow para reiniciar la animación
+                    mainImg.style.animation = kbName + ' ' + kbDur + ' ease-out forwards';
+                }
+            }
+
             // Auto-iniciar rotación de fotos: tick persistente de 100ms que recorre el orden
             // [principal, foto2, foto3, ..., principal]. El timer NO puede ser reiniciado por
             // AUDIO_TIME_UPDATE del padre (~cada 250ms), así que la galería avanza siempre.
             // Al finalizar el último segmento (volver a la principal) el timer se detiene.
             if (slides && slides.length > 1) {
                 applyDuration(baseDuration);
+                // Activar la primera foto (principal) con su animación Ken Burns ya aplicada
+                activatePhoto(0);
             }
             if (slides && slides.length > 1) {
                 slideInterval = setInterval(function() {
                     var now = performance.now();
                     if (now - lastPhotoTick >= photoDurMs) {
                         if (nextRotationIndex < rotationOrder.length) {
-                            // Desactivar la foto actual
-                            slides[currentPhotoIndex].classList.remove('active');
-                            // Activar la siguiente según rotationOrder
+                            // Activar la siguiente según rotationOrder (aplica active + animación)
                             currentPhotoIndex = rotationOrder[nextRotationIndex];
-                            slides[currentPhotoIndex].classList.add('active');
+                            activatePhoto(currentPhotoIndex);
                             nextRotationIndex++;
                             lastPhotoTick = now;
-
-                            // Reiniciar animación Ken Burns al re-activar (evita que la animación
-                            // continúe desde el progreso previo en lugar de arrancar fresh).
-                            var mainImg = slides[currentPhotoIndex].querySelector('.photo-main');
-                            if (mainImg && mainImg.style.animation) {
-                                mainImg.style.animation = 'none';
-                                void mainImg.offsetHeight;
-                                mainImg.style.animation = '';
-                            }
                         } else {
                             // Orden completado: detener el timer. La última foto activa será la
                             // imagen principal (rotationOrder[rotationOrder.length-1] === 0).
