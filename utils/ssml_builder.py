@@ -36,14 +36,14 @@ def apply_rioplatense_phonetics(text: str) -> str:
     
     text = re.sub(
         r's(?=[bcdfghjklmnñpqrstvwxyzBCDFGHJKLMNÑPQRSTVWXYZ])',
-        'h',
+        'hs',
         text
     )
-    
-    text = re.sub(r's\b', 'h', text)
+
+    text = re.sub(r's\b', 'hs', text)
     text = text.replace('§S_INTERVOCALICA§', 's')
     
-    text = re.sub(r'\by\b', 'sh', text, flags=re.IGNORECASE)
+    text = re.sub(r'\by\b', 'i', text, flags=re.IGNORECASE)
     text = re.sub(r'\by(?=[aeiouáéíóúAEIOUÁÉÍÓÚ])', 'sh', text, flags=re.IGNORECASE)
     text = re.sub(r'll', 'sh', text, flags=re.IGNORECASE)
     

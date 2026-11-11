@@ -18,10 +18,12 @@ def preprocess_rioplatense(text: str) -> str:
     processed = re.sub(r'(?<![A-ZÁÉÍÓÚÜÑ])Y(?=[aeiouáéíóú])', 'Sh', processed)
     processed = re.sub(r'(?<![A-ZÁÉÍÓÚÜÑ])Y(?=[AEIOUÁÉÍÓÚ])', 'Sh', processed)
 
-    # Aspiración de S en coda — con (?!h) para NO tocar el dígrafo 'sh' recién creado
-    # ("saladillo" → "saladisho", NUNCA "saladihho")
-    processed = re.sub(r's(?!h)(?=[bcdfghjklmnpqrstvwxyz])', 'h', processed)
-    processed = re.sub(r's(?=\s|$|[.,;:!?])', 'h', processed)
+    # Aspiración suave de S en coda — con (?!h) para NO tocar el dígrafo 'sh' recién creado
+    # Usamos 'hs' en vez de 'h' puro: preserva la fricción sibilante con aire,
+    # evitando que la S suene completamente ausente o como una J gutural.
+    # ("bosque" → "boshke", NUNCA "bohke")
+    processed = re.sub(r's(?!h)(?=[bcdfghjklmnpqrstvwxyz])', 'hs', processed)
+    processed = re.sub(r's(?=\s|$|[.,;:!?])', 'hs', processed)
 
     # Tag tonal obligatorio: se antepone AL FINAL, intacto (nunca se reescribe fonéticamente)
     processed = f"[relaxed, colloquial tone, argentinian rioplatense accent, mild s-aspiration] {processed}"

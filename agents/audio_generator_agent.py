@@ -64,7 +64,7 @@ except ImportError:
 from .storage_agent import StorageAgent, load_env_credentials
 from .ai_rewriter_agent import load_env_variables
 from utils.gemini_tts_rotator import gemini_rotator, GEMINI_VOICE
-from utils.ssml_builder import build_ssml
+from utils.ssml_builder import build_ssml, apply_rioplatense_phonetics, STYLE_TAG
 try:
     from utils.tts_phonetic_adapter import adapt_text_for_tts
 except ImportError:
@@ -110,45 +110,9 @@ INSTITUTIONAL_CLOSING_PHRASES = [
     "Saladillo Vivo. Un paso más allá que leer las noticias."
 ]
 
-# Tag de estilo para Gemini TTS (SOUL.md)
-GEMINI_TTS_STYLE_TAG = "[relaxed, colloquial tone, argentinian rioplatense accent]"
-
-
-def apply_rioplatense_phonetics(text: str) -> str:
-    """
-    Aplica las reglas fonéticas rioplatenses obligatorias (SOUL.md) para Gemini TTS.
-    Gemini TTS lee el texto literalmente, por lo que debemos reescribir:
-    1. S ante consonante → h (aspiración)
-    2. S final → h (aspiración)
-    3. S intervocálica se mantiene (excepción)
-    4. Y / LL → sh (yeísmo rehilado)
-    """
-    if not text:
-        return ""
-
-    # Primero, protegemos la S intervocálica marcándola temporalmente
-    # Patrón: vocal + s + vocal (case insensitive)
-    text = re.sub(r'([aeiouáéíóúAEIOUÁÉÍÓÚ])s([aeiouáéíóúAEIOUÁÉÍÓÚ])',
-                  r'\1§S_INTERVOCALICA§\2', text, flags=re.IGNORECASE)
-
-    # 1. S ante consonante → h (aspiración suave)
-    # Consonantes: b c d f g h j k l m n ñ p q r s t v w x y z
-    text = re.sub(r's(?=[bcdfghjklmnñpqrstvwxyzBCDFGHJKLMNÑPQRSTVWXYZ])', 'h', text)
-
-    # 2. S final de palabra → h
-    text = re.sub(r's\b', 'h', text)
-
-    # 3. Restaurar S intervocálica protegida
-    text = text.replace('§S_INTERVOCALICA§', 's')
-
-    # 4. Yeísmo rehilado: Y / LL → sh
-    # Y como consonante inicial o entre vocales
-    text = re.sub(r'\by\b', 'sh', text, flags=re.IGNORECASE)  # "y" sola
-    text = re.sub(r'\by(?=[aeiouáéíóúAEIOUÁÉÍÓÚ])', 'sh', text, flags=re.IGNORECASE)  # "ya", "yo", etc.
-    text = re.sub(r'll', 'sh', text, flags=re.IGNORECASE)  # "ll" → "sh"
-
-    return text
-
+# Tag de estilo para Gemini TTS — se reusa el STYLE_TAG canónico de ssml_builder
+# para garantizar coherencia total con SOUL.md (incluye mild s-aspiration).
+GEMINI_TTS_STYLE_TAG = STYLE_TAG
 
 def build_ssml(text: str) -> str:
     """Construye el prompt completo para Gemini TTS con tag de estilo y reescritura fonética."""
