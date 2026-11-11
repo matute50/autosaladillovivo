@@ -800,16 +800,16 @@ class SlideGeneratorAgent:
             timed_words.append({"w": w, "s": start_t, "e": end_t})
             cur_t = end_t
 
-        # Agrupar en líneas de una sola línea horizontal (promedio 7-10 palabras, max ~52 caracteres)
+        # Agrupar en segmentos de hasta 2 líneas horizontales (max ~105 caracteres / ~16 palabras)
         lines = []
         cur_line = []
         cur_len = 0
         for tw in timed_words:
             w_str = tw["w"]
             if cur_line and (
-                cur_len + len(w_str) + 1 > 52
-                or len(cur_line) >= 9
-                or (cur_line[-1]["w"].endswith(('.', '!', '?')) and len(cur_line) >= 5)
+                cur_len + len(w_str) + 1 > 105
+                or len(cur_line) >= 16
+                or (cur_line[-1]["w"].endswith(('.', '!', '?')) and len(cur_line) >= 6)
             ):
                 lines.append(cur_line)
                 cur_line = [tw]
@@ -820,12 +820,12 @@ class SlideGeneratorAgent:
         if cur_line:
             lines.append(cur_line)
 
-        # Balancear última línea si quedó descolgada (< 4 palabras)
-        if len(lines) > 1 and len(lines[-1]) < 4:
+        # Balancear última línea si quedó descolgada (< 6 palabras)
+        if len(lines) > 1 and len(lines[-1]) < 6:
             prev = lines[-2]
             last = lines[-1]
-            needed = 4 - len(last)
-            if len(prev) - needed >= 4:
+            needed = 6 - len(last)
+            if len(prev) - needed >= 6:
                 moved = prev[-needed:]
                 lines[-2] = prev[:-needed]
                 lines[-1] = moved + last
@@ -1091,7 +1091,7 @@ class SlideGeneratorAgent:
            ========================================================================== */
         .subtitle-stage {
             position: absolute;
-            bottom: 5.8%;
+            bottom: 3.0%;
             left: 0;
             width: 100%;
             z-index: 20;
@@ -1104,18 +1104,15 @@ class SlideGeneratorAgent:
 
         .subtitle-single-line {
             display: inline-flex;
-            flex-wrap: nowrap;
+            flex-wrap: wrap;
             justify-content: center;
             align-items: baseline;
             width: 100%;
             max-width: 95vw;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: clip;
             font-family: 'Century Gothic', 'Montserrat', -apple-system, sans-serif;
-            font-size: clamp(1.25rem, 3.2vw, 2.6rem);
+            font-size: clamp(1.1rem, 2.8vw, 2.3rem);
             font-weight: 700;
-            line-height: 1.25;
+            line-height: 1.35;
             letter-spacing: -0.01em;
             text-align: center;
         }
@@ -1347,6 +1344,13 @@ class SlideGeneratorAgent:
             // Inicializar con la primera línea
             if (timedLines.length > 0) {
                 renderLine(0);
+            }
+
+            // Auto-iniciar rotación de fotos inmediatamente usando baseDuration.
+            // Esto funciona tanto en standalone (sin mensajes del padre) como en embed,
+            // ya que applyDuration se asegura de limpiar intervals previos antes de crear uno nuevo.
+            if (slides && slides.length > 1) {
+                applyDuration(baseDuration);
             }
 
             // Sincronización centralizada: solo escucha eventos del reproductor padre (VideoSection)
