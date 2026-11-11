@@ -7,12 +7,12 @@ class SlideGeneratorAgentTests(unittest.TestCase):
     def setUp(self):
         self.agent = SlideGeneratorAgent()
 
-    def test_slide_contains_ken_burns_single_line_karaoke_and_audio(self):
+    def test_slide_contains_ken_burns_single_line_karaoke_and_no_internal_audio(self):
         title = "Saladillo: Pavimentación y Obras Viales"
         text = "El intendente recorrió las obras de pavimentación con una inversión de 30 millones de pesos."
         audio_url = "https://example.com/audio.mp3"
         images = [{"url": "https://example.com/foto.jpg", "focal_x": 50.0, "focal_y": 40.0, "is_banner": False, "enable_ken_burns": True}]
-        
+
         html = self.agent.create_slide_html(
             article_id=101,
             title=title,
@@ -40,11 +40,29 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertIn("updateSubtitles", html)
         self.assertIn("active-speaking", html)
 
-        # 4. Audio con autoplay y play()
-        self.assertIn('id="slideAudio"', html)
-        self.assertIn(audio_url, html)
-        self.assertIn("autoplay", html)
-        self.assertIn("audio.play()", html)
+        # 4. NO genera etiqueta <audio> interna — sincronización es centralizada por VideoSection.tsx
+        self.assertNotIn('id="slideAudio"', html)
+        self.assertNotIn("audio.play()", html)
+        self.assertNotIn('<audio ', html)  # No debe haber apertura de tag audio
+
+    def test_slide_uses_relative_fallback_image_url(self):
+        """La URL de fallback debe ser relativa, no hardcodeada a dominio externo."""
+        title = "Noticia sin imagen"
+        text = "Texto de prueba."
+        html = self.agent.create_slide_html(
+            article_id=999,
+            title=title,
+            text=text,
+            audio_url="",
+            images=[],
+            audio_duration=10.0
+        )
+        # Verificar que NO hay URLs hardcodeadas al dominio de Vercel
+        self.assertNotIn("saladillovivo.vercel.app", html)
+        # Cuando no hay imágenes, el HTML no incluye onerror con fallback;
+        # la verificación se hace en process_images_for_slide
+        fallback_result = self.agent.process_images_for_slide(999, [])
+        self.assertEqual(fallback_result[0]["url"], "/default-og-image.png")
 
     def test_promo_line_has_dedicated_gold_css(self):
         """La clase .is-promo-line debe tener reglas CSS doradas definidas."""
@@ -68,6 +86,24 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         # Debe existir también el estilo para palabras spoken y futuras en dorado atenuado
         self.assertIn(".subtitle-single-line.is-promo-line .word-token.spoken", html)
         self.assertIn(".subtitle-single-line.is-promo-line .word-token", html)
+
+    def test_promo_always_included_when_duration_sufficient(self):
+        """La frase institucional debe incluirse siempre que la duración total sea >= 5s."""
+        text = "El intendente anunció obras nuevas en Saladillo."
+
+        # Con 6 segundos SÍ debe incluir promo (umbral anterior era 8s)
+        lines_6s = self.agent.generate_timed_subtitles(text, 6.0)
+        self.assertTrue(any(l.get("is_promo") for l in lines_6s),
+                        "Debería incluir promo con 6s de duración")
+
+        # Con 10 segundos también debe incluir promo
+        lines_10s = self.agent.generate_timed_subtitles(text, 10.0)
+        self.assertTrue(any(l.get("is_promo") for l in lines_10s))
+
+        # Con menos de 5s NO debería incluir promo
+        lines_4s = self.agent.generate_timed_subtitles(text, 4.0)
+        self.assertFalse(any(l.get("is_promo") for l in lines_4s),
+                         "No debería incluir promo con solo 4s")
 
     def test_ken_burns_enabled_always_in_process_images(self):
         images = self.agent.process_images_for_slide(102, [])

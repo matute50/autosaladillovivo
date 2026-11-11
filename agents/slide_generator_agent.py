@@ -86,17 +86,18 @@ logger.setLevel(logging.INFO)
 class SlideGeneratorAgent:
     def estimate_audio_duration(self, text: str) -> float:
         """
-        Calcula una estimación precisa de la duración del audio en segundos
-        basada en la tasa de elocución estándar rioplatense (~125 palabras/min)
-        más 1 segundo de silencio y 3 segundos de frase institucional.
+        Calcula una estimación PROVISIONAL de la duración del audio en segundos.
+        Úsese SOLO como fallback cuando no se dispone de la duración real del MP3.
+        La duración real debe provenir de pydub/ffprobe y pasar por audio_duration
+        explícita a create_slide_html().
         """
         words = len(text.strip().split()) if text else 0
         duration = (words / 2.08) + 1.0 + 3.0
-        return max(20.0, min(round(duration, 1), 120.0))
+        return max(4.0, min(round(duration, 1), 120.0))
 
     def generate_default_visuals(self, title: str, text: str) -> Dict:
         """
-        Genera metadatos estructurados para lower thirds y placa central TV-Grade
+        Genera metadatos estructurados para el kicker y elementos visuales
         en caso de que no hayan sido provistos por el modelo de IA.
         """
         t_lower = f"{title} {text}".lower()
@@ -646,7 +647,7 @@ class SlideGeneratorAgent:
         processed_images: List[Dict] = []
 
         if not image_urls:
-            return [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": True}]
+            return [{"url": "/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "method": "default", "enable_ken_burns": True}]
 
         for i, image_url in enumerate(image_urls):
             if not image_url or not isinstance(image_url, str):
@@ -741,7 +742,7 @@ class SlideGeneratorAgent:
                 "enable_ken_burns": True
             })
 
-        return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": True}]
+        return processed_images if processed_images else [{"url": "/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": True}]
 
     def generate_timed_subtitles(self, text: str, total_duration: float, promo_phrase: str = "En Saladillo Vivo. Dale play a la noticia.") -> List[Dict]:
         """
@@ -755,8 +756,9 @@ class SlideGeneratorAgent:
         if not words:
             return []
 
-        # Determinar si el audio incluye frase de promo y pausa de 1s
-        has_promo = total_duration > 8.0
+        # Siempre incluir frase promocional institucional tras pausa de 1s
+        # (siempre que la duración permita un cierre viable de >= 2.5s)
+        has_promo = total_duration >= 5.0
         if has_promo:
             promo_words = promo_phrase.split()
             promo_dur = max(2.5, min(4.0, len(promo_words) * 0.45))
@@ -864,6 +866,10 @@ class SlideGeneratorAgent:
         El texto de la noticia se subtitula en una sola línea horizontal en la franja inferior,
         llenando el ancho de la pantalla y cambiando de color las palabras de forma sincronizada
         al ritmo exacto del audio (karaoke teleprompter broadcast).
+        
+        Nota: NO genera etiqueta <audio> interna; la reproducción es centralizada por
+        VideoSection.tsx que envía eventos postMessage (START_NEWS_PLAYBACK, AUDIO_TIME_UPDATE,
+        SET_AUDIO_DURATION) para sincronizar subtítulos y fotogramas sin riesgo de eco/doble audio.
         """
         if not audio_duration or audio_duration <= 0:
             audio_duration = self.estimate_audio_duration(text)
@@ -1168,7 +1174,7 @@ class SlideGeneratorAgent:
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
             <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
-                 onerror="this.src='https://saladillovivo.vercel.app/default-og-image.png'">
+                 onerror="this.src='/default-og-image.png'">
         </div>
         {% endfor %}
     </div>
@@ -1198,13 +1204,8 @@ class SlideGeneratorAgent:
         <div class="progress-line-fill" id="progressLineFill"></div>
     </div>
 
-    {% if audio_url %}
-    <audio id="slideAudio" src="{{ audio_url }}" autoplay preload="auto" playsinline style="display:none;"></audio>
-    {% endif %}
-
     <script>
         (function() {
-            var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
             var lineEl = document.getElementById('subtitleLine');
             var progressFill = document.getElementById('progressLineFill');
@@ -1222,23 +1223,6 @@ class SlideGeneratorAgent:
             // Si corre en pestaña directa o standalone, arranca de inmediato con autoplay.
             var isEmbedded = (window.self !== window.top);
             var playbackStarted = !isEmbedded;
-            if (isEmbedded && audio) {
-                try {
-                    audio.pause();
-                    audio.currentTime = 0;
-                } catch(e) {}
-            }
-
-            function triggerPlaybackStart() {
-                if (playbackStarted) return;
-                playbackStarted = true;
-                startTime = performance.now();
-                if (audio && !hasParentUpdates) {
-                    audio.play().catch(function(err) {
-                        console.warn("Autoplay slide:", err);
-                    });
-                }
-            }
 
             function renderLine(lineIdx) {
                 if (lineIdx < 0 || lineIdx >= timedLines.length) {
@@ -1348,41 +1332,19 @@ class SlideGeneratorAgent:
                 renderLine(0);
             }
 
-            // 1. Audio interno y fallback (solo en standalone)
-            if (audio) {
-                audio.addEventListener('loadedmetadata', function() {
-                    if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
-                        applyDuration(audio.duration);
-                    }
-                });
-
-                audio.addEventListener('timeupdate', function() {
-                    if (!hasParentUpdates && audio.duration > 0 && playbackStarted) {
-                        updateSubtitles(audio.currentTime, audio.duration);
-                    }
-                });
-
-                if (!isEmbedded) {
-                    triggerPlaybackStart();
-                }
-            }
-
-            // 2. Escuchar mensajes del reproductor padre (VideoSection)
+            // Sincronización centralizada: solo escucha eventos del reproductor padre (VideoSection)
+            // El audio se reproduce en el elemento <audio> centralizado de VideoSection.tsx;
+            // este iframe NO genera su propio <audio> para evitar doble reproducción/eco.
             window.addEventListener('message', function(e) {
                 if (!e.data) return;
                 if (e.data.type === 'START_NEWS_PLAYBACK') {
-                    triggerPlaybackStart();
+                    playbackStarted = true;
                 }
                 if ((e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION') && e.data.duration) {
                     applyDuration(e.data.duration);
                 }
                 if (e.data.type === 'AUDIO_TIME_UPDATE') {
-                    playbackStarted = true;
                     hasParentUpdates = true;
-                    if (audio && !audio.muted) {
-                        audio.muted = true;
-                        audio.pause();
-                    }
                     if (e.data.duration && isFinite(e.data.duration) && e.data.duration > 0) {
                         applyDuration(e.data.duration);
                     }
@@ -1391,15 +1353,11 @@ class SlideGeneratorAgent:
                 }
             });
 
-            // 3. Reloj autónomo infalible de respaldo (inicia solo cuando playbackStarted es true)
+            // Reloj autónomo de respaldo (solo activa si no hay actualizaciones del padre)
             function autonomousLoop(now) {
                 if (playbackStarted && !hasParentUpdates) {
-                    if (audio && !audio.paused && audio.duration > 0) {
-                        updateSubtitles(audio.currentTime, audio.duration);
-                    } else {
-                        var elapsed = (now - startTime) / 1000;
-                        updateSubtitles(elapsed % (activeDuration + 0.1), activeDuration);
-                    }
+                    var elapsed = (now - startTime) / 1000;
+                    updateSubtitles(elapsed % (activeDuration + 0.1), activeDuration);
                 }
                 requestAnimationFrame(autonomousLoop);
             }
@@ -1433,7 +1391,7 @@ class SlideGeneratorAgent:
                 timed_lines=timed_lines
             )
         else:
-            first_img = images[0] if images else {"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50, "focal_y": 45}
+            first_img = images[0] if images else {"url": "/default-og-image.png", "focal_x": 50, "focal_y": 45}
             img_url = first_img.get("url", first_img) if isinstance(first_img, dict) else first_img
             fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
             fy = first_img.get("focal_y", 45) if isinstance(first_img, dict) else 45
