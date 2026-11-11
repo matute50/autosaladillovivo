@@ -22,10 +22,12 @@ class SlideGeneratorAgentTests(unittest.TestCase):
             audio_duration=25.0
         )
 
-        # 1. Animación Ken Burns y foto 100% nítida
-        self.assertIn("kenBurnsZoom", html)
+        # 1. Animación Ken Burns aplicada de forma INLINE vía activatePhoto (no clases CSS)
+        self.assertIn("activatePhoto", html)
+        self.assertIn("kenBurnsZoomIn", html)
         self.assertIn("photo-main", html)
         self.assertNotIn("no-ken-burns", html)
+        # Clases kb-zoomin/kb-zoomout YA NO se inyectan: la dirección la decide el JS
 
         # 2. Sin Lower Thirds flotantes ni placas invasivas
         self.assertNotIn("floating-lower-third", html)
@@ -165,9 +167,10 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertNotIn("% slides.length", html)
         #    Reinicio de Ken Burns al volver a activar cada foto (reflow con offsetHeight)
         self.assertIn("mainImg.offsetHeight", html)
-        #    Cada .photo-slide tiene clase kb-zoomin o kb-zoomout según posición par/impar
-        self.assertIn("kb-zoomin", html)
-        self.assertIn("kb-zoomout", html)
+        #    La dirección (zoom in / out) la decide el JS según par/impar del índice, no clases CSS
+        self.assertIn("idx % 2 === 0", html)
+        self.assertNotIn("kb-zoomin", html)
+        self.assertNotIn("kb-zoomout", html)
 
     def test_single_photo_uses_full_audio_duration(self):
         """Con una sola foto, el tiempo por foto es la duración completa del audio."""
@@ -181,7 +184,9 @@ class SlideGeneratorAgentTests(unittest.TestCase):
             audio_duration=20.0
         )
         self.assertIn("--slide-photo-duration: 20.0s", html)
-        self.assertIn("kenBurnsZoom", html)
+        # Foto única también debe recibir animación Ken Burns inline vía activatePhoto (>=1)
+        self.assertIn("activatePhoto", html)
+        self.assertIn("kenBurnsZoomIn", html)
 
 
 if __name__ == "__main__":

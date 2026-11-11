@@ -1028,14 +1028,6 @@ class SlideGeneratorAgent:
             100% { transform: scale(1.0); }
         }
 
-        @keyframes kenBurnsZoom {
-            0% { transform: scale(1.0); }
-            25% { transform: scale(1.20); }
-            50% { transform: scale(1.0); }
-            75% { transform: scale(1.20); }
-            100% { transform: scale(1.0); }
-        }
-
         /* Gradiente cinemático inferior para lectura perfecta sin tapar la foto */
         .bottom-gradient-scrim {
             position: absolute;
@@ -1192,7 +1184,7 @@ class SlideGeneratorAgent:
 <body>
     <div class="fullscreen-container" id="slideshowContainer">
         {% for img in images %}
-        <div class="photo-slide {% if loop.first %}active{% endif %} {% if loop.index0 % 2 == 0 %}kb-zoomin{% else %}kb-zoomout{% endif %} {% if img.is_banner %}is-banner{% endif %}">
+        <div class="photo-slide {% if loop.first %}active{% endif %} {% if img.is_banner %}is-banner{% endif %}">
             <div class="photo-backdrop" style="background-image: url('{{ img.url if img.url is defined else img }}');"></div>
             <img src="{{ img.url if img.url is defined else img }}" alt="" class="photo-main"
                  style="transform-origin: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%; object-position: {{ img.focal_x if img.focal_x is defined else 50 }}% {{ img.focal_y if img.focal_y is defined else 45 }}%;"
@@ -1398,11 +1390,14 @@ class SlideGeneratorAgent:
             // [principal, foto2, foto3, ..., principal]. El timer NO puede ser reiniciado por
             // AUDIO_TIME_UPDATE del padre (~cada 250ms), así que la galería avanza siempre.
             // Al finalizar el último segmento (volver a la principal) el timer se detiene.
-            if (slides && slides.length > 1) {
+            // Con >= 1 se asegura que incluso UNA sola foto tenga animación Ken Burns inline
+            // (activatePhoto aplica la dirección según par/impar sin depender de galería).
+            if (slides && slides.length >= 1) {
                 applyDuration(baseDuration);
                 // Activar la primera foto (principal) con su animación Ken Burns ya aplicada
                 activatePhoto(0);
             }
+            // Solo hay rotación cuando hay más de una foto
             if (slides && slides.length > 1) {
                 slideInterval = setInterval(function() {
                     var now = performance.now();
