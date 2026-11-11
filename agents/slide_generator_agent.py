@@ -1124,6 +1124,22 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
         }
 
+        /* LÍNEA INSTITUCIONAL DE PROMO — estilo dorado broadcast */
+        .subtitle-single-line.is-promo-line .word-token.active-speaking {
+            color: var(--color-speaking-gold) !important;
+            font-weight: 900 !important;
+            transform: scale(1.09) translateY(-1px);
+            text-shadow: 0 0 16px rgba(250, 204, 21, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
+        }
+        .subtitle-single-line.is-promo-line .word-token.spoken {
+            color: rgba(250, 204, 21, 0.75) !important;
+            font-weight: 700;
+            opacity: 0.9;
+        }
+        .subtitle-single-line.is-promo-line .word-token {
+            color: rgba(250, 204, 21, 0.35);
+        }
+
         /* Barra de progreso global sutil */
         .progress-line-track {
             position: absolute;

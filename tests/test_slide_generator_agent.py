@@ -46,6 +46,29 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertIn("autoplay", html)
         self.assertIn("audio.play()", html)
 
+    def test_promo_line_has_dedicated_gold_css(self):
+        """La clase .is-promo-line debe tener reglas CSS doradas definidas."""
+        title = "Noticia prueba"
+        text = "El intendente anunció obras nuevas en Saladillo."
+        audio_url = "https://example.com/audio.mp3"
+        images = [{"url": "https://example.com/foto.jpg", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "enable_ken_burns": True}]
+
+        html = self.agent.create_slide_html(
+            article_id=200,
+            title=title,
+            text=text,
+            audio_url=audio_url,
+            images=images,
+            audio_duration=18.0
+        )
+
+        # Debe existir la regla CSS para promo line (palabra activa dorada)
+        self.assertIn(".subtitle-single-line.is-promo-line .word-token.active-speaking", html)
+        self.assertIn("color: var(--color-speaking-gold)", html)
+        # Debe existir también el estilo para palabras spoken y futuras en dorado atenuado
+        self.assertIn(".subtitle-single-line.is-promo-line .word-token.spoken", html)
+        self.assertIn(".subtitle-single-line.is-promo-line .word-token", html)
+
     def test_ken_burns_enabled_always_in_process_images(self):
         images = self.agent.process_images_for_slide(102, [])
         self.assertTrue(images[0]["enable_ken_burns"])
