@@ -688,9 +688,20 @@ class ScraperAgent:
                 'logo', 'icon', 'avatar', 'gravatar', 'banner', 'pixel', 'advert',
                 'publicidad', 'sponsor', 'theme', 'emoji', 'button', 'mobile.png',
                 'empty.png', 'transparente', '.svg', 'facebook', 'twitter', 'instagram',
-                'whatsapp', 'share', 'jeg-empty', 'pinterest', 'linkedin'
+                'whatsapp', 'share', 'jeg-empty', 'pinterest', 'linkedin',
+                'gym', 'huracan-gym', 'farmacia', 'turno', 'cooptex', 'climatizadores',
+                'maridel', 'estampadora', 'sorteo', 'promo'
             ]):
                 return
+
+            # Si la imagen oficial del artículo tiene un año reciente (ej: 2026),
+            # descartar imágenes de años viejos (2023, 2024, etc.) que corresponden a banners fijos
+            if og_image:
+                og_year_match = re.search(r'/uploads/(202[5-9])/', og_image)
+                if og_year_match:
+                    recent_year = og_year_match.group(1)
+                    if any(f"/uploads/{old_y}/" in norm_url for old_y in ['2020', '2021', '2022', '2023', '2024']):
+                        return
 
             # Descartar miniaturas explícitas que no se hayan podido desescalar
             if re.search(r'-(?:80x80|100x100|150x150)\.(?:webp|jpg|jpeg|png)', lower):
@@ -723,11 +734,15 @@ class ScraperAgent:
             else:
                 scoped_html = cleaned_html
 
-        # 3. Prioridad 1: Buscar la imagen destacada principal de WordPress (wp-post-image o fetchpriority)
+        # 3. Prioridad 1 Absoluta: La imagen oficial de la noticia (og:image)
+        if og_image:
+            add_candidate(normalize_image_url(og_image, base_url))
+
+        # 3b. Buscar la imagen destacada principal de WordPress (wp-post-image o fetchpriority)
         featured_image = None
         for img_tag in re.findall(r'<img\s+[^>]+>', scoped_html, re.I):
             attrs_lower = img_tag.lower()
-            if any(k in attrs_lower for k in ['gravatar', 'avatar', '80x80', '150x150', 'logo', 'icon', 'advert']):
+            if any(k in attrs_lower for k in ['gravatar', 'avatar', '80x80', '150x150', 'logo', 'icon', 'advert', 'gym', 'farmacia']):
                 continue
             if any(k in attrs_lower for k in ['wp-post-image', 'fetchpriority', 'attachment-post-thumbnail', 'attachment-large', 'attachment-full']):
                 src_m = re.search(r'(?:data-large-file|data-orig-file|data-full-url|data-img-url|data-src|src)=[\x22\x27]([^\x22\x27]+)[\x22\x27]', img_tag, re.I)
@@ -739,8 +754,6 @@ class ScraperAgent:
 
         if featured_image:
             add_candidate(featured_image)
-        elif og_image:
-            add_candidate(normalize_image_url(og_image, base_url))
 
         # 4. Extraer enlaces directos a imágenes (típicos de galerías lightbox)
         for a_match in re.finditer(r'<a\s+[^>]*href=[\x22\x27](https?://[^\x22\x27]+\.(?:jpg|jpeg|png|webp)(?:\?[^\x22\x27]*)?)[\x22\x27]', scoped_html, re.I):
@@ -839,9 +852,11 @@ class ScraperAgent:
         description = parser.meta_description or (parser.paragraphs[0] if parser.paragraphs else title)
 
         # Extracción completa de fotos de la noticia y galerías garantizando Full HD
-        gallery_images = self.extract_gallery_images(html, url, parser.meta_og_image)
-        raw_img = gallery_images[0] if gallery_images else (parser.meta_og_image or 'https://saladillovivo.vercel.app/default-og-image.png')
-        image_url = normalize_image_url(raw_img, url) or 'https://saladillovivo.vercel.app/default-og-image.png'
+        canonical_image = normalize_image_url(parser.meta_og_image, url) if parser.meta_og_image else None
+        gallery_images = self.extract_gallery_images(html, url, canonical_image)
+        # La imagen principal ES la imagen oficial de la noticia (og:image) o la primera de la galería validada
+        image_url = canonical_image or (gallery_images[0] if gallery_images else 'https://saladillovivo.vercel.app/default-og-image.png')
+        og_image_url = canonical_image or image_url
 
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
 
@@ -853,6 +868,7 @@ class ScraperAgent:
             'description': description[:300],
             'original_description': description[:300],
             'image_url': image_url,
+            'og_image_url': og_image_url,
             'images_urls': gallery_images,
             'source_url': url,
             'source_name': source_name,

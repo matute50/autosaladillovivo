@@ -326,17 +326,17 @@ const VideoSection: React.FC = () => {
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isNewsIntroActive) {
-      // P3-fix: duración dinámica — nunca superar el 30% del slide ni los 4s fijos
-      const slideDurationMs = currentSlide ? (currentSlide.duration || 15) * 1000 : 15000;
-      const introDuration = Math.min(4000, slideDurationMs * 0.3);
+      // Watchdog de seguridad (7s) por si el video de intro no dispara onEnded o falla su carga.
+      // El video /videos_intro/noticias.mp4 dura 4.64s y debe finalizar naturalmente via onEnded
+      // antes de que comience la locución del cuerpo de la noticia.
       timer = setTimeout(() => {
         setIsNewsIntroActive(false);
-      }, introDuration);
+      }, 7000);
     }
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [isNewsIntroActive, setIsNewsIntroActive, currentSlide]);
+  }, [isNewsIntroActive, setIsNewsIntroActive]);
 
 
   useEffect(() => {
@@ -634,6 +634,14 @@ const VideoSection: React.FC = () => {
               preload="auto"
               crossOrigin="anonymous"
               playsInline
+              onPlay={() => {
+                try {
+                  const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
+                  if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'START_NEWS_PLAYBACK' }, '*');
+                  }
+                } catch (err) {}
+              }}
               onLoadedMetadata={(e) => {
                 const el = e.currentTarget;
                 if (el.duration && isFinite(el.duration) && el.duration > 0) {
@@ -741,9 +749,21 @@ const VideoSection: React.FC = () => {
                     className="w-full h-full object-contain"
                     onEnded={() => {
                       setIsNewsIntroActive(false);
+                      try {
+                        const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
+                        if (iframe && iframe.contentWindow) {
+                          iframe.contentWindow.postMessage({ type: 'START_NEWS_PLAYBACK' }, '*');
+                        }
+                      } catch (err) {}
                     }}
                     onError={() => {
                       setIsNewsIntroActive(false);
+                      try {
+                        const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
+                        if (iframe && iframe.contentWindow) {
+                          iframe.contentWindow.postMessage({ type: 'START_NEWS_PLAYBACK' }, '*');
+                        }
+                      } catch (err) {}
                     }}
                   />
                 </motion.div>

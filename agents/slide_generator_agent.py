@@ -652,9 +652,17 @@ class SlideGeneratorAgent:
             if not image_url or not isinstance(image_url, str):
                 continue
 
-            # Descartar avatares, logos o miniaturas explícitas que no sean contenido del artículo
+            # Descartar avatares, logos o banners de anunciantes
             lower_url = image_url.lower()
-            if any(k in lower_url for k in ['gravatar', 'avatar', 'logo', 'icon', 'pixel', 'banner']):
+            if any(k in lower_url for k in [
+                'gravatar', 'avatar', 'logo', 'icon', 'pixel', 'banner', 'advert',
+                'publicidad', 'sponsor', 'gym', 'huracan-gym', 'farmacia', 'turno',
+                'cooptex', 'climatizadores', 'maridel', 'estampadora'
+            ]):
+                continue
+
+            # Descartar imágenes de uploads viejos (2020-2024) si son banners residuales
+            if any(f"/uploads/{old_y}/" in image_url for old_y in ['2020', '2021', '2022', '2023', '2024']):
                 continue
 
             if image_url.startswith("http://") or image_url.startswith("https://"):
@@ -735,16 +743,30 @@ class SlideGeneratorAgent:
 
         return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": True}]
 
-    def generate_timed_subtitles(self, text: str, total_duration: float) -> List[Dict]:
+    def generate_timed_subtitles(self, text: str, total_duration: float, promo_phrase: str = "En Saladillo Vivo. Dale play a la noticia.") -> List[Dict]:
         """
         Segmenta el texto de la noticia en líneas horizontales de una sola línea
-        adaptadas al ancho de pantalla (16:9 broadcast), y asigna timestamps precisos
-        (inicio y fin) a cada palabra basados en longitud y pausas de puntuación.
+        adaptadas al ancho de pantalla (16:9 broadcast).
+        Alinea la lectura del cuerpo de la noticia y garantiza que la frase de promoción
+        inicie EXACTAMENTE un segundo después del final de la lectura del cuerpo.
         """
         clean_text = re.sub(r'\s+', ' ', text.strip()) if text else ""
         words = clean_text.split()
         if not words:
             return []
+
+        # Determinar si el audio incluye frase de promo y pausa de 1s
+        has_promo = total_duration > 8.0
+        if has_promo:
+            promo_words = promo_phrase.split()
+            promo_dur = max(2.5, min(4.0, len(promo_words) * 0.45))
+            pause_dur = 1.0  # Exactamente 1 segundo de pausa tras el cuerpo
+            body_dur = max(4.0, total_duration - pause_dur - promo_dur)
+        else:
+            body_dur = total_duration
+            promo_words = []
+            promo_dur = 0.0
+            pause_dur = 0.0
 
         weights = []
         for w in words:
@@ -757,7 +779,7 @@ class SlideGeneratorAgent:
 
         total_w = sum(weights)
         speech_start = 0.4
-        speech_end = max(speech_start + 1.0, total_duration - 0.8)
+        speech_end = body_dur
         avail_time = speech_end - speech_start
 
         timed_words = []
@@ -805,8 +827,32 @@ class SlideGeneratorAgent:
                 "index": idx,
                 "start": l[0]["s"],
                 "end": l[-1]["e"],
-                "words": l
+                "words": l,
+                "is_promo": False
             })
+
+        # Línea de la frase de promoción: inicia exactamente 1 segundo después del final del cuerpo
+        if has_promo and promo_words:
+            promo_start = round(body_dur + 1.0, 2)
+            promo_end = round(total_duration, 2)
+            p_avail = max(1.0, promo_end - promo_start)
+            p_timed = []
+            p_cur = promo_start
+            p_weights = [max(2, len(pw)) for pw in promo_words]
+            p_total_w = sum(p_weights)
+            for i, pw in enumerate(promo_words):
+                dur = (p_weights[i] / p_total_w) * p_avail
+                p_timed.append({"w": pw, "s": round(p_cur, 2), "e": round(p_cur + dur, 2)})
+                p_cur += dur
+
+            formatted_lines.append({
+                "index": len(formatted_lines),
+                "start": promo_start,
+                "end": promo_end,
+                "words": p_timed,
+                "is_promo": True
+            })
+
         return formatted_lines
 
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
@@ -1137,7 +1183,7 @@ class SlideGeneratorAgent:
     </div>
 
     {% if audio_url %}
-    <audio id="slideAudio" src="{{ audio_url }}" preload="auto" autoplay playsinline style="display:none;"></audio>
+    <audio id="slideAudio" src="{{ audio_url }}" autoplay preload="auto" playsinline style="display:none;"></audio>
     {% endif %}
 
     <script>
@@ -1156,6 +1202,28 @@ class SlideGeneratorAgent:
             var hasParentUpdates = false;
             var startTime = performance.now();
 
+            // Si corre dentro del iframe de VideoSection, espera a que termine la animación NOTICIAS.
+            // Si corre en pestaña directa o standalone, arranca de inmediato con autoplay.
+            var isEmbedded = (window.self !== window.top);
+            var playbackStarted = !isEmbedded;
+            if (isEmbedded && audio) {
+                try {
+                    audio.pause();
+                    audio.currentTime = 0;
+                } catch(e) {}
+            }
+
+            function triggerPlaybackStart() {
+                if (playbackStarted) return;
+                playbackStarted = true;
+                startTime = performance.now();
+                if (audio && !hasParentUpdates) {
+                    audio.play().catch(function(err) {
+                        console.warn("Autoplay slide:", err);
+                    });
+                }
+            }
+
             function renderLine(lineIdx) {
                 if (lineIdx < 0 || lineIdx >= timedLines.length) {
                     if (lineEl) lineEl.innerHTML = '';
@@ -1169,6 +1237,12 @@ class SlideGeneratorAgent:
 
                 lineEl.innerHTML = '';
                 currentWordsEls = [];
+
+                if (lineData.is_promo) {
+                    lineEl.classList.add('is-promo-line');
+                } else {
+                    lineEl.classList.remove('is-promo-line');
+                }
 
                 for (var i = 0; i < lineData.words.length; i++) {
                     var wData = lineData.words[i];
@@ -1258,7 +1332,7 @@ class SlideGeneratorAgent:
                 renderLine(0);
             }
 
-            // 1. Audio interno y autoplay fallback
+            // 1. Audio interno y fallback (solo en standalone)
             if (audio) {
                 audio.addEventListener('loadedmetadata', function() {
                     if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
@@ -1267,37 +1341,27 @@ class SlideGeneratorAgent:
                 });
 
                 audio.addEventListener('timeupdate', function() {
-                    if (!hasParentUpdates && audio.duration > 0) {
+                    if (!hasParentUpdates && audio.duration > 0 && playbackStarted) {
                         updateSubtitles(audio.currentTime, audio.duration);
                     }
                 });
 
-                var playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(function() {
-                        console.log("Audio de slide reproduciendo exitosamente.");
-                    }).catch(function(err) {
-                        console.warn("Autoplay restringido por navegador:", err);
-                        var unlockAudio = function() {
-                            if (!hasParentUpdates) {
-                                audio.play();
-                            }
-                            document.removeEventListener('click', unlockAudio);
-                            document.removeEventListener('touchstart', unlockAudio);
-                        };
-                        document.addEventListener('click', unlockAudio, { once: true });
-                        document.addEventListener('touchstart', unlockAudio, { once: true });
-                    });
+                if (!isEmbedded) {
+                    triggerPlaybackStart();
                 }
             }
 
             // 2. Escuchar mensajes del reproductor padre (VideoSection)
             window.addEventListener('message', function(e) {
                 if (!e.data) return;
+                if (e.data.type === 'START_NEWS_PLAYBACK') {
+                    triggerPlaybackStart();
+                }
                 if ((e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION') && e.data.duration) {
                     applyDuration(e.data.duration);
                 }
                 if (e.data.type === 'AUDIO_TIME_UPDATE') {
+                    playbackStarted = true;
                     hasParentUpdates = true;
                     if (audio && !audio.muted) {
                         audio.muted = true;
@@ -1311,9 +1375,9 @@ class SlideGeneratorAgent:
                 }
             });
 
-            // 3. Reloj autónomo infalible de respaldo
+            // 3. Reloj autónomo infalible de respaldo (inicia solo cuando playbackStarted es true)
             function autonomousLoop(now) {
-                if (!hasParentUpdates) {
+                if (playbackStarted && !hasParentUpdates) {
                     if (audio && !audio.paused && audio.duration > 0) {
                         updateSubtitles(audio.currentTime, audio.duration);
                     } else {
