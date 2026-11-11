@@ -122,6 +122,57 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertEqual(first_word["w"], "La")
         self.assertGreaterEqual(first_word["s"], 0.4)
 
+    def test_gallery_multiple_photos_renders_all_slides_with_fade_and_proportional_time(self):
+        """Con galería de N fotos, el slide debe renderizar N .photo-slide, usar crossfade
+        y asignar a cada foto un tiempo = duración_total_audio / cantidad_de_fotos."""
+        n_photos = 4
+        audio_duration = 36.0
+        images = [
+            {"url": f"https://example.com/foto{i}.jpg", "focal_x": 50.0, "focal_y": 45.0,
+             "is_banner": False, "enable_ken_burns": True}
+            for i in range(n_photos)
+        ]
+        html = self.agent.create_slide_html(
+            article_id=500,
+            title="Galería múltiple",
+            text="Una noticia con varias fotos en su galería.",
+            audio_url="https://example.com/audio.mp3",
+            images=images,
+            audio_duration=audio_duration
+        )
+
+        # 1. Se renderizan TODAS las capas .photo-slide (una por foto)
+        import re
+        self.assertEqual(len(re.findall(r'class="photo-slide', html)), n_photos)
+        # Todas las URLs de las fotos están presentes
+        for i in range(n_photos):
+            self.assertIn(f"https://example.com/foto{i}.jpg", html)
+
+        # 2. Crossfade (fade) entre fotos presente
+        self.assertIn("transition: opacity 1.5s ease-in-out", html)
+        self.assertIn(".photo-slide.active", html)
+
+        # 3. Tiempo por foto = duración total / cantidad de fotos
+        #    En el CSS: --slide-photo-duration: 9.0s (36/4)
+        self.assertIn("--slide-photo-duration: 9.0s", html)
+        #    En el JS: durationPerSlideMs = round(photoDur*1000) = 9000
+        self.assertIn("durationPerSlideMs", html)
+        self.assertIn("(currentIndex + 1) % slides.length", html)
+
+    def test_single_photo_uses_full_audio_duration(self):
+        """Con una sola foto, el tiempo por foto es la duración completa del audio."""
+        html = self.agent.create_slide_html(
+            article_id=501,
+            title="Foto única",
+            text="Noticia con una sola foto.",
+            audio_url="https://example.com/audio.mp3",
+            images=[{"url": "https://example.com/unica.jpg", "focal_x": 50.0, "focal_y": 45.0,
+                     "is_banner": False, "enable_ken_burns": True}],
+            audio_duration=20.0
+        )
+        self.assertIn("--slide-photo-duration: 20.0s", html)
+        self.assertIn("kenBurnsZoom", html)
+
 
 if __name__ == "__main__":
     unittest.main()
