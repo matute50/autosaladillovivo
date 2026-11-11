@@ -63,6 +63,7 @@ except ImportError:
 
 from .storage_agent import StorageAgent, load_env_credentials
 from .ai_rewriter_agent import load_env_variables
+from .constants import INSTITUTIONAL_CLOSING_PHRASES
 from utils.gemini_tts_rotator import gemini_rotator, GEMINI_VOICE
 from utils.ssml_builder import build_ssml, apply_rioplatense_phonetics, STYLE_TAG
 try:
@@ -75,40 +76,8 @@ logger = logging.getLogger("AudioGeneratorAgent")
 logger.setLevel(logging.INFO)
 
 
-# Frases institucionales de cierre elegidas al azar
-INSTITUTIONAL_CLOSING_PHRASES = [
-    "En Saladillo Vivo. Dale play a la noticia.",
-    "No lo leas, escuchálo, en Saladillo Vivo.",
-    "Saladillo Vivo le pone voz a las noticias.",
-    "Escuchá más, en Saladillo Vivo.",
-    "Seguí escuchando, en Saladillo Vivo.",
-    "La ciudad se escucha, en Saladillo Vivo.",
-    "Enteráte escuchando, en Saladillo Vivo.",
-    "Más info, en voz alta, en Saladillo Vivo.",
-    "Saladillo Vivo. Menos textos, más audios.",
-    "Cerrá los ojos, y escuchá Saladillo Vivo.",
-    "Pasáte al audio, en Saladillo Vivo.",
-    "Saladillo Vivo. Escuchar es la nueva forma de informarte.",
-    "Poné play a tu día, en Saladillo Vivo.",
-    "Dejános contarte la noticia, solo en Saladillo Vivo.",
-    "Escuchálo ahora, en Saladillo Vivo.",
-    "Todo suena mejor, en Saladillo Vivo.",
-    "Viví la noticia, en Saladillo Vivo.",
-    "Sentí Saladillo, en Saladillo Vivo.",
-    "Saladillo Vivo. La voz de la ciudad.",
-    "Informáte al instante, en Saladillo Vivo.",
-    "Saladillo Vivo. Un paso adelante.",
-    "Saladillo Vivo. La evolución de la noticia.",
-    "Escuchá el futuro, en Saladillo Vivo.",
-    "Saladillo Vivo. Innovación en noticias.",
-    "Siempre un paso adelante, en Saladillo Vivo.",
-    "Los demás leen, nosotros te lo contamos. Solo en Saladillo Vivo.",
-    "Adelantáte a todos escuchando en Saladillo Vivo.",
-    "La nueva era de la info, en Saladillo Vivo.",
-    "Innovamos para que solo escuches. Solo en Saladillo Vivo.",
-    "Saladillo Vivo. Un paso más allá de la lectura.",
-    "Saladillo Vivo. Un paso más allá que leer las noticias."
-]
+# Frases institucionales de cierre elegidas al azar (reimportadas de constants para compatibilidad)
+from .constants import INSTITUTIONAL_CLOSING_PHRASES  # noqa: F401
 
 # Tag de estilo para Gemini TTS — se reusa el STYLE_TAG canónico de ssml_builder
 # para garantizar coherencia total con SOUL.md (incluye mild s-aspiration).
@@ -217,14 +186,26 @@ class AudioGeneratorAgent:
         """Devuelve la siguiente voz alternada (Tomas/Elena) para la locución."""
         return next(self._voice_cycle)
 
-    def get_random_closing_phrase(self) -> str:
-        """Selecciona al azar una frase de cierre institucional para la noticia."""
+    def get_random_closing_phrase(self, article_id: Union[int, str] = None) -> str:
+        """Selecciona la frase de cierre institucional para la noticia.
+
+        Si se pasa article_id, la selección es DETERMINÍSTICA (semilla basada en el id),
+        de modo que AudioGeneratorAgent y SlideGeneratorAgent elijan SIEMPRE la misma
+        frase para el mismo artículo y el subtitulado coincida con el audio.
+        """
+        if article_id is not None:
+            rng = random.Random(f"saladillo-{article_id}")
+            return rng.choice(INSTITUTIONAL_CLOSING_PHRASES)
         return random.choice(INSTITUTIONAL_CLOSING_PHRASES)
 
     def generate_audio_filename(self, article_id: Union[int, str], title: str) -> str:
-        """Genera un nombre de archivo único y predecible para el audio."""
+        """Genera un nombre de archivo único y predecible para el audio.
+
+        Incluye timestamp con segundos para forzar cache-busting en Supabase/CDN
+        (un filename distinto por generación evita que se sirva el audio viejo).
+        """
         clean_title = re.sub(r'[^\w\-]', '_', title)[:40].strip('_')
-        hash_input = f"{article_id}_{clean_title}_{datetime.now().strftime('%Y%m')}"
+        hash_input = f"{article_id}_{clean_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         file_hash = hashlib.md5(hash_input.encode('utf-8')).hexdigest()[:8]
         return f"article_{article_id}_{file_hash}.mp3"
 
@@ -677,8 +658,8 @@ class AudioGeneratorAgent:
         clean_title = self.clean_text_for_speech(title)
         clean_text = self.clean_text_for_speech(text)
 
-        # Estructura de locución: Título TTS + Cuerpo radial (+ 1 s silencio + promo)
-        body_parts = [p for p in (clean_title, clean_text) if p]
+        # Estructura de locución: SOLO Cuerpo radial (Título NO se lee), + 1s silencio + promo
+        body_parts = [clean_text] if clean_text else []
         body_speech = ". ".join(body_parts)
         # Adaptador fonético determinista para Edge TTS (respiración, números en
         # palabras, siglas desglosadas, extranjerismos rioplatenses)
@@ -686,7 +667,8 @@ class AudioGeneratorAgent:
 
         # Voz alternada por noticia (directiva editorial): Tomas / Elena
         voice = self.next_voice()
-        closing_phrase = self.get_random_closing_phrase()
+        # Selección determinística por article_id: audio y slide eligen la MISMA frase
+        closing_phrase = self.get_random_closing_phrase(article_id)
 
         logger.info(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(body_speech)} | VOZ: {voice}")
         logger.info(f'  [AudioGeneratorAgent] Frase institucional de cierre: "{closing_phrase}"')

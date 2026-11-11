@@ -20,6 +20,7 @@ import sys
 import re
 import json
 import time
+import random
 import hashlib
 import logging
 import asyncio
@@ -78,6 +79,7 @@ except ImportError:
     HAS_SUPABASE = False
 
 from .storage_agent import load_env_credentials
+from .constants import INSTITUTIONAL_CLOSING_PHRASES
 
 logger = logging.getLogger("SlideGeneratorAgent")
 logger.setLevel(logging.INFO)
@@ -562,9 +564,14 @@ class SlideGeneratorAgent:
             self.logger.warning(f"No se pudo verificar el bucket '{self.bucket_name}': {e}")
 
     def generate_slide_filename(self, article_id: Union[int, str], title: str) -> str:
-        """Genera un nombre de archivo único para el slide."""
+        """Genera un nombre de archivo único para el slide.
+
+        Incluye timestamp con segundos para garantizar un filename distinto por
+        generación y forzar cache-busting en Supabase Storage/CDN (evita que se
+        siga sirviendo el HTML viejo por una URL determinista repetida).
+        """
         clean_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).rstrip()
-        hash_input = f"{article_id}_{clean_title}_{datetime.now().strftime('%Y%m%d')}"
+        hash_input = f"{article_id}_{clean_title}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         file_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
         return f"slide_{article_id}_{file_hash}.html"
 
@@ -882,7 +889,12 @@ class SlideGeneratorAgent:
                 if k not in visuals or not visuals[k]:
                     visuals[k] = v
 
-        timed_lines = self.generate_timed_subtitles(text, audio_duration)
+        # Selección determinística de la frase promocional (misma semilla que el audio)
+        # para que el subtítulo dorado coincida EXACTAMENTE con la locución del cierre.
+        _rng = random.Random(f"saladillo-{article_id}")
+        promo_phrase = _rng.choice(INSTITUTIONAL_CLOSING_PHRASES)
+
+        timed_lines = self.generate_timed_subtitles(text, audio_duration, promo_phrase)
         if not timed_lines:
             timed_lines = [{
                 "index": 0,
@@ -1367,17 +1379,6 @@ class SlideGeneratorAgent:
                 requestAnimationFrame(autonomousLoop);
             }
             requestAnimationFrame(autonomousLoop);
-
-            // Inicialización de rotación proporcional de fotos
-            if (slides && slides.length > 1 && !slideInterval) {
-                var initialPhotoDur = Math.round(({{ (photo_duration | round(1)) if photo_duration else 15 }}) * 1000);
-                var currentIndex = 0;
-                slideInterval = setInterval(function() {
-                    slides[currentIndex].classList.remove('active');
-                    currentIndex = (currentIndex + 1) % slides.length;
-                    slides[currentIndex].classList.add('active');
-                }, Math.max(2500, initialPhotoDur));
-            }
         })();
     </script>
 </body>
