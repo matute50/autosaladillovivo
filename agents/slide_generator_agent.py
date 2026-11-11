@@ -1231,6 +1231,14 @@ class SlideGeneratorAgent:
             var hasParentUpdates = false;
             var startTime = performance.now();
 
+            // Estado de rotación de la galería de fotos.
+            // Se mantienen FUERA de applyDuration para que los mensajes AUDIO_TIME_UPDATE
+            // del padre (frecuentes, ~cada 250ms) NO reinicien el contador ni congelen la
+            // rotación. photoDurMs se actualiza en applyDuration sin recrear el timer.
+            var currentPhotoIndex = 0;
+            var photoDurMs = Math.round((baseDuration / (slides.length || 1)) * 1000);
+            var lastPhotoTick = performance.now();
+
             // Si corre dentro del iframe de VideoSection, espera a que termine la animación NOTICIAS.
             // Si corre en pestaña directa o standalone, arranca de inmediato con autoplay.
             var isEmbedded = (window.self !== window.top);
@@ -1327,15 +1335,10 @@ class SlideGeneratorAgent:
                     document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
                     // Reducir velocidad Ken Burns a 70% del tiempo por foto para un ciclo suave
                     document.documentElement.style.setProperty('--kb-speed', '0.7');
-
-                    if (slideInterval) clearInterval(slideInterval);
-                    var durationPerSlideMs = Math.round(photoDur * 1000);
-                    var currentIndex = 0;
-                    slideInterval = setInterval(function() {
-                        slides[currentIndex].classList.remove('active');
-                        currentIndex = (currentIndex + 1) % slides.length;
-                        slides[currentIndex].classList.add('active');
-                    }, durationPerSlideMs);
+                    // Solo actualiza la duración por foto; el timer de rotación es persistente
+                    // (tick de 100ms) y NO se recrea aquí para no reiniciar la galería.
+                    photoDurMs = Math.round(photoDur * 1000);
+                    if (photoDurMs < 500) photoDurMs = 500;
                 } else {
                     document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
                 }
@@ -1346,11 +1349,24 @@ class SlideGeneratorAgent:
                 renderLine(0);
             }
 
-            // Auto-iniciar rotación de fotos inmediatamente usando baseDuration.
-            // Esto funciona tanto en standalone (sin mensajes del padre) como en embed,
-            // ya que applyDuration se asegura de limpiar intervals previos antes de crear uno nuevo.
+            // Auto-iniciar rotación de fotos: se aplica la duración base y se arranca un
+            // tick persistente de 100ms que mide el tiempo REAL transcurrido por foto.
+            // A diferencia de un setInterval recreado en cada applyDuration, este tick
+            // NO puede ser reiniciado por los AUDIO_TIME_UPDATE del padre (que llegan cada
+            // ~250ms), por lo que la galería avanza siempre y no queda congelada en la foto 1.
             if (slides && slides.length > 1) {
                 applyDuration(baseDuration);
+            }
+            if (slides && slides.length > 1) {
+                slideInterval = setInterval(function() {
+                    var now = performance.now();
+                    if (now - lastPhotoTick >= photoDurMs) {
+                        slides[currentPhotoIndex].classList.remove('active');
+                        currentPhotoIndex = (currentPhotoIndex + 1) % slides.length;
+                        slides[currentPhotoIndex].classList.add('active');
+                        lastPhotoTick = now;
+                    }
+                }, 100);
             }
 
             // Sincronización centralizada: solo escucha eventos del reproductor padre (VideoSection)

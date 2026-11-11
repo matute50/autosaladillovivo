@@ -155,9 +155,12 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         # 3. Tiempo por foto = duración total / cantidad de fotos
         #    En el CSS: --slide-photo-duration: 9.0s (36/4)
         self.assertIn("--slide-photo-duration: 9.0s", html)
-        #    En el JS: durationPerSlideMs = round(photoDur*1000) = 9000
-        self.assertIn("durationPerSlideMs", html)
-        self.assertIn("(currentIndex + 1) % slides.length", html)
+        #    En el JS: rotación robusta con tick persistente de 100ms que mide el
+        #    tiempo real transcurrido (photoDurMs = round(photoDur*1000) = 9000),
+        #    para que los AUDIO_TIME_UPDATE del padre NO reinicien ni congelen la galería.
+        self.assertIn("photoDurMs = Math.round(photoDur * 1000)", html)
+        self.assertIn("(currentPhotoIndex + 1) % slides.length", html)
+        self.assertIn("}, 100);", html)
 
     def test_single_photo_uses_full_audio_duration(self):
         """Con una sola foto, el tiempo por foto es la duración completa del audio."""
