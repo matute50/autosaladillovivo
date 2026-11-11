@@ -735,15 +735,89 @@ class SlideGeneratorAgent:
 
         return processed_images if processed_images else [{"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50.0, "focal_y": 45.0, "is_banner": False, "method": "default", "enable_ken_burns": True}]
 
+    def generate_timed_subtitles(self, text: str, total_duration: float) -> List[Dict]:
+        """
+        Segmenta el texto de la noticia en líneas horizontales de una sola línea
+        adaptadas al ancho de pantalla (16:9 broadcast), y asigna timestamps precisos
+        (inicio y fin) a cada palabra basados en longitud y pausas de puntuación.
+        """
+        clean_text = re.sub(r'\s+', ' ', text.strip()) if text else ""
+        words = clean_text.split()
+        if not words:
+            return []
+
+        weights = []
+        for w in words:
+            p = len(w)
+            if w.endswith(('.', '!', '?')):
+                p += 6
+            elif w.endswith((',', ';', ':')):
+                p += 3
+            weights.append(max(2, p))
+
+        total_w = sum(weights)
+        speech_start = 0.4
+        speech_end = max(speech_start + 1.0, total_duration - 0.8)
+        avail_time = speech_end - speech_start
+
+        timed_words = []
+        cur_t = speech_start
+        for i, w in enumerate(words):
+            dur = (weights[i] / total_w) * avail_time
+            start_t = round(cur_t, 2)
+            end_t = round(cur_t + dur, 2)
+            timed_words.append({"w": w, "s": start_t, "e": end_t})
+            cur_t = end_t
+
+        # Agrupar en líneas de una sola línea horizontal (promedio 7-10 palabras, max ~52 caracteres)
+        lines = []
+        cur_line = []
+        cur_len = 0
+        for tw in timed_words:
+            w_str = tw["w"]
+            if cur_line and (
+                cur_len + len(w_str) + 1 > 52
+                or len(cur_line) >= 9
+                or (cur_line[-1]["w"].endswith(('.', '!', '?')) and len(cur_line) >= 5)
+            ):
+                lines.append(cur_line)
+                cur_line = [tw]
+                cur_len = len(w_str)
+            else:
+                cur_line.append(tw)
+                cur_len += len(w_str) + 1
+        if cur_line:
+            lines.append(cur_line)
+
+        # Balancear última línea si quedó descolgada (< 4 palabras)
+        if len(lines) > 1 and len(lines[-1]) < 4:
+            prev = lines[-2]
+            last = lines[-1]
+            needed = 4 - len(last)
+            if len(prev) - needed >= 4:
+                moved = prev[-needed:]
+                lines[-2] = prev[:-needed]
+                lines[-1] = moved + last
+
+        formatted_lines = []
+        for idx, l in enumerate(lines):
+            formatted_lines.append({
+                "index": idx,
+                "start": l[0]["s"],
+                "end": l[-1]["e"],
+                "words": l
+            })
+        return formatted_lines
+
     def create_slide_html(self, article_id: Union[int, str], title: str, text: str,
                           audio_url: str, images: List[str], audio_duration: Optional[float] = None,
                           visuals: Optional[Dict] = None) -> str:
         """
         Genera el documento HTML del slide interactivo con diseño profesional TV-Grade.
-        La animación Ken Burns se sincroniza para realizar 2 ciclos completos de zoom in/out
-        durante la duración del audio del slide, con un zoom in cinematográfico continuo.
-        Incluye Lower Thirds flotantes dinámicos de apertura y remate, y Placa Central con efecto
-        Rack Focus generados por IA, adaptándose en 3 actos (>8.5s) o modo flash directo (<=8.5s).
+        La fotografía ocupa el 100% de la pantalla con animación Ken Burns continua y nítida.
+        El texto de la noticia se subtitula en una sola línea horizontal en la franja inferior,
+        llenando el ancho de la pantalla y cambiando de color las palabras de forma sincronizada
+        al ritmo exacto del audio (karaoke teleprompter broadcast).
         """
         if not audio_duration or audio_duration <= 0:
             audio_duration = self.estimate_audio_duration(text)
@@ -755,10 +829,15 @@ class SlideGeneratorAgent:
             for k, v in default_v.items():
                 if k not in visuals or not visuals[k]:
                     visuals[k] = v
-            if isinstance(visuals.get('placa'), dict) and isinstance(default_v.get('placa'), dict):
-                for pk, pv in default_v['placa'].items():
-                    if pk not in visuals['placa'] or not visuals['placa'][pk]:
-                        visuals['placa'][pk] = pv
+
+        timed_lines = self.generate_timed_subtitles(text, audio_duration)
+        if not timed_lines:
+            timed_lines = [{
+                "index": 0,
+                "start": 0.4,
+                "end": audio_duration,
+                "words": [{"w": w, "s": 0.4, "e": audio_duration} for w in title.split()]
+            }]
 
         total_photos = len(images) if images else 1
         photo_duration = round(audio_duration / total_photos, 1) if total_photos > 1 else audio_duration
@@ -779,6 +858,7 @@ class SlideGeneratorAgent:
             --color-primary: #003399;
             --color-primary-light: #0055ff;
             --color-accent-sky: #38bdf8;
+            --color-speaking-gold: #facc15;
         }
 
         * {
@@ -837,7 +917,7 @@ class SlideGeneratorAgent:
             transform: scale(1.15);
         }
 
-        /* Foto principal nítida con animación Ken Burns centrada en el punto de atención */
+        /* Foto principal nítida con animación Ken Burns continua */
         .photo-main {
             position: absolute;
             top: 0;
@@ -853,7 +933,7 @@ class SlideGeneratorAgent:
             animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
-        /* BANNERS / AFICHES (Contenidos con zoom elegante continuo) */
+        /* BANNERS / AFICHES */
         .photo-slide.is-banner .photo-main {
             object-fit: contain !important;
             animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
@@ -871,208 +951,51 @@ class SlideGeneratorAgent:
             100% { transform: scale(1.0); }
         }
 
-        /*
-           Animación Ken Burns adaptada a la duración exacta del audio
-           Efectúa exactamente 2 ciclos completos de Zoom In y Zoom Out
-           durante el tiempo de reproducción del audio.
-        */
         @keyframes kenBurnsZoom {
             0% { transform: scale(1.0); }
-            25% { transform: scale(1.22); }
+            25% { transform: scale(1.20); }
             50% { transform: scale(1.0); }
-            75% { transform: scale(1.22); }
+            75% { transform: scale(1.20); }
             100% { transform: scale(1.0); }
         }
 
-        /* ==========================================================================
-           LOWER THIRD FLOTANTE (Acto 1 & 3: Apertura y Remate)
-           ========================================================================== */
-        .floating-lower-third {
+        /* Gradiente cinemático inferior para lectura perfecta sin tapar la foto */
+        .bottom-gradient-scrim {
             position: absolute;
-            bottom: 5.5%;
-            left: 4.5%;
-            max-width: 88%;
-            min-width: 260px;
-            z-index: 20;
-            background: rgba(6, 12, 28, 0.90);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-left: 4px solid var(--color-primary);
-            border-radius: 12px;
-            padding: 10px 18px 10px 18px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 51, 153, 0.35);
-            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-            will-change: opacity, transform;
-        }
-
-        .floating-lower-third.hidden-stage {
-            opacity: 0;
-            transform: translateY(14px) scale(0.97);
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 42%;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.58) 50%, rgba(0, 0, 0, 0) 100%);
             pointer-events: none;
+            z-index: 10;
         }
 
-        .lt-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 6px;
-        }
-
-        .lt-badge {
+        /* Branding minimalista superior */
+        .top-brand-badge {
+            position: absolute;
+            top: 4.5%;
+            left: 4.5%;
+            z-index: 25;
             display: inline-flex;
             align-items: center;
-            background: var(--color-primary);
+            gap: 9px;
+            background: rgba(6, 12, 28, 0.72);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            padding: 6px 14px;
+            border-radius: 9999px;
             color: #ffffff;
-            font-size: clamp(0.65rem, 1.2vw, 0.78rem);
+            font-size: clamp(0.68rem, 1.2vw, 0.82rem);
             font-weight: 700;
             letter-spacing: 0.08em;
             text-transform: uppercase;
-            padding: 3px 8px;
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 51, 153, 0.45);
-        }
-
-        .lt-brand {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            color: rgba(255, 255, 255, 0.92);
-            font-size: clamp(0.65rem, 1.2vw, 0.76rem);
-            font-weight: 800;
-            letter-spacing: 0.1em;
-        }
-
-        .lt-live-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background-color: #ef4444;
-            box-shadow: 0 0 6px #ef4444;
-            animation: pulseDot 2s infinite ease-in-out;
-        }
-
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
-        }
-
-        .lt-content-wrap {
-            margin-bottom: 8px;
-        }
-
-        .lt-headline {
-            color: #ffffff;
-            font-size: clamp(0.95rem, 2.2vw, 1.4rem);
-            font-weight: 700;
-            line-height: 1.25;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
-            transition: opacity 0.35s ease;
-        }
-
-        .lt-progress-track {
-            width: 100%;
-            height: 3px;
-            background: rgba(255, 255, 255, 0.16);
-            border-radius: 2px;
-            overflow: hidden;
-        }
-
-        .lt-progress-bar {
-            width: 0%;
-            height: 100%;
-            background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
-            box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
-            transition: width 0.1s linear;
-        }
-
-        /* ==========================================================================
-           RACK FOCUS LAYER (Desenfoque cinemático sobre la foto sin frenar Ken Burns)
-           ========================================================================== */
-        .rack-focus-layer {
-            position: absolute;
-            inset: 0;
-            z-index: 10;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
             pointer-events: none;
-            opacity: 0;
-            background: rgba(3, 7, 18, 0);
-            backdrop-filter: blur(0px);
-            -webkit-backdrop-filter: blur(0px);
-            transition: opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-                        backdrop-filter 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-                        -webkit-backdrop-filter 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-                        background 0.75s cubic-bezier(0.16, 1, 0.3, 1);
-            will-change: opacity, backdrop-filter, background;
         }
 
-        .rack-focus-layer.active {
-            opacity: 1;
-            background: rgba(3, 7, 18, 0.72);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-        }
-
-        /* ==========================================================================
-           PLACA CENTRAL DE IMPACTO (Acto 2: Citas, Cifras o Síntesis)
-           ========================================================================== */
-        .central-card {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) scale(0.95);
-            width: min(88%, 760px);
-            max-height: 86%;
-            z-index: 15;
-            opacity: 0;
-            pointer-events: none;
-            background: rgba(6, 12, 28, 0.94);
-            backdrop-filter: blur(28px);
-            -webkit-backdrop-filter: blur(28px);
-            border: 1px solid rgba(0, 85, 255, 0.4);
-            border-top: 4px solid var(--color-primary);
-            border-radius: 20px;
-            padding: clamp(20px, 3.8vw, 36px) clamp(22px, 4.5vw, 44px);
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 50px rgba(0, 51, 153, 0.35);
-            text-align: center;
-            transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
-                        transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            will-change: opacity, transform;
-        }
-
-        .central-card.visible-stage {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translate(-50%, -50%) scale(1.0);
-        }
-
-        .card-top-bar {
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .card-brand {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            color: #ffffff;
-            font-size: clamp(0.7rem, 1.3vw, 0.85rem);
-            font-weight: 800;
-            letter-spacing: 0.12em;
-        }
-
-        .card-live-dot {
+        .live-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
@@ -1081,101 +1004,97 @@ class SlideGeneratorAgent:
             animation: pulseDot 2s infinite ease-in-out;
         }
 
-        .card-badge {
-            background: var(--color-primary);
-            color: #ffffff;
-            font-size: clamp(0.65rem, 1.2vw, 0.8rem);
-            font-weight: 800;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            padding: 4px 10px;
-            border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0, 51, 153, 0.5);
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.35; transform: scale(0.85); }
         }
 
-        .card-context-title {
+        .brand-sep {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.85em;
+        }
+
+        .kicker-text {
             color: var(--color-accent-sky);
-            font-size: clamp(0.75rem, 1.4vw, 0.9rem);
+            font-weight: 800;
+        }
+
+        /* ==========================================================================
+           SUBTITULADO EN UNA SOLA LÍNEA AL RITMO DEL AUDIO (Karaoke Broadcast)
+           ========================================================================== */
+        .subtitle-stage {
+            position: absolute;
+            bottom: 5.8%;
+            left: 0;
+            width: 100%;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 3.5vw;
+            pointer-events: none;
+        }
+
+        .subtitle-single-line {
+            display: inline-flex;
+            flex-wrap: nowrap;
+            justify-content: center;
+            align-items: baseline;
+            width: 100%;
+            max-width: 95vw;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: clip;
+            font-family: 'Century Gothic', 'Montserrat', -apple-system, sans-serif;
+            font-size: clamp(1.25rem, 3.2vw, 2.6rem);
             font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            margin-bottom: 12px;
-        }
-
-        .card-quote-icon {
-            font-size: clamp(2.8rem, 6vw, 4.2rem);
-            line-height: 0.6;
-            color: var(--color-primary-light);
-            margin-bottom: 10px;
-            font-family: Georgia, serif;
-            text-shadow: 0 2px 16px rgba(0, 85, 255, 0.6);
-        }
-
-        .card-quote-text {
-            color: #ffffff;
-            font-size: clamp(1.1rem, 2.5vw, 1.65rem);
-            font-weight: 600;
-            font-style: italic;
-            line-height: 1.35;
-            margin-bottom: 16px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
-        }
-
-        .card-author-line {
-            color: var(--color-accent-sky);
-            font-size: clamp(0.8rem, 1.5vw, 1.05rem);
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
-        .card-stat-number {
-            color: #ffffff;
-            font-size: clamp(2.4rem, 6vw, 4.5rem);
-            font-weight: 900;
-            letter-spacing: -0.02em;
-            line-height: 1.05;
-            margin-bottom: 14px;
-            text-shadow: 0 4px 24px rgba(0, 85, 255, 0.7);
-        }
-
-        .card-stat-desc {
-            color: rgba(255, 255, 255, 0.95);
-            font-size: clamp(0.95rem, 2vw, 1.35rem);
-            font-weight: 600;
-            line-height: 1.35;
-        }
-
-        .card-headline-strong {
-            color: #ffffff;
-            font-size: clamp(1.15rem, 2.6vw, 1.7rem);
-            font-weight: 800;
             line-height: 1.25;
-            margin-bottom: 12px;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+            letter-spacing: -0.01em;
+            text-align: center;
         }
 
-        .card-summary-desc {
-            color: rgba(255, 255, 255, 0.92);
-            font-size: clamp(0.9rem, 2vw, 1.25rem);
-            font-weight: 500;
-            line-height: 1.4;
+        .word-token {
+            display: inline-block;
+            margin: 0 0.22em;
+            color: rgba(255, 255, 255, 0.38); /* Palabras futuras: atenuadas */
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
+            transition: color 0.12s ease, transform 0.12s ease, text-shadow 0.12s ease;
+            will-change: color, transform;
         }
 
-        .card-progress-track {
+        /* Palabra activa en el instante de locución */
+        .word-token.active-speaking {
+            color: var(--color-speaking-gold) !important; /* Amarillo oro TV */
+            font-weight: 900 !important;
+            transform: scale(1.09) translateY(-1px);
+            text-shadow: 0 0 16px rgba(250, 204, 21, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
+        }
+
+        /* Palabra ya pronunciada */
+        .word-token.spoken {
+            color: #ffffff !important;
+            font-weight: 700;
+            opacity: 0.95;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+        }
+
+        /* Barra de progreso global sutil */
+        .progress-line-track {
+            position: absolute;
+            bottom: 0;
+            left: 0;
             width: 100%;
             height: 3px;
-            background: rgba(255, 255, 255, 0.16);
-            border-radius: 2px;
-            margin-top: 22px;
+            background: rgba(255, 255, 255, 0.14);
+            z-index: 30;
             overflow: hidden;
         }
 
-        .card-progress-bar {
+        .progress-line-fill {
             width: 0%;
             height: 100%;
-            background: linear-gradient(90deg, var(--color-primary-light), var(--color-accent-sky));
-            box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+            background: linear-gradient(90deg, #0055ff, #38bdf8, #facc15);
+            box-shadow: 0 0 8px rgba(250, 204, 21, 0.6);
             transition: width 0.1s linear;
         }
     </style>
@@ -1192,58 +1111,29 @@ class SlideGeneratorAgent:
         {% endfor %}
     </div>
 
-    <!-- CAPA RACK FOCUS (DESENFOQUE CINEMÁTICO SOBRE LA FOTO) -->
-    <div class="rack-focus-layer" id="rackFocusLayer"></div>
+    <!-- GRADIENTE CINEMÁTICO INFERIOR -->
+    <div class="bottom-gradient-scrim"></div>
 
-    <!-- PLACA CENTRAL DE IMPACTO (ACTO 2: Citas, Cifras o Síntesis) -->
-    <div class="central-card" id="centralCard">
-        <div class="card-top-bar">
-            <div class="card-brand">
-                <span class="card-live-dot"></span>
-                SALADILLO VIVO
-            </div>
-            <div class="card-badge">{{ visuals.kicker }}</div>
-        </div>
-
-        {% if visuals.tipo_placa == 'CITA' %}
-        <div class="card-quote-icon">“</div>
-        <div class="card-quote-text">{{ visuals.placa.destacado }}</div>
-        <div class="card-author-line">— {{ visuals.placa.bajada }}</div>
-        {% elif visuals.tipo_placa == 'DATO_NUMERICO' %}
-        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="card-stat-number">{{ visuals.placa.destacado }}</div>
-        <div class="card-stat-desc">{{ visuals.placa.bajada }}</div>
-        {% elif visuals.tipo_placa == 'PUNTOS_CLAVE' %}
-        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="card-headline-strong">{{ visuals.placa.destacado }}</div>
-        <div class="card-stat-desc">{{ visuals.placa.bajada }}</div>
-        {% else %}
-        <!-- RESUMEN EDITORIAL -->
-        <div class="card-context-title">{{ visuals.placa.titulo }}</div>
-        <div class="card-headline-strong">{{ visuals.placa.destacado }}</div>
-        <div class="card-summary-desc">{{ visuals.placa.bajada }}</div>
+    <!-- BRANDING DISCRETO SUPERIOR -->
+    <div class="top-brand-badge">
+        <span class="live-dot"></span>
+        <span class="brand-text">SALADILLO VIVO</span>
+        {% if visuals.kicker %}
+        <span class="brand-sep">&bull;</span>
+        <span class="kicker-text">{{ visuals.kicker }}</span>
         {% endif %}
+    </div>
 
-        <div class="card-progress-track">
-            <div class="card-progress-bar" id="cardProgressBar"></div>
+    <!-- SUBTITULADO DEL TEXTO EN UNA SOLA LÍNEA AL RITMO DEL AUDIO -->
+    <div class="subtitle-stage" id="subtitleStage">
+        <div class="subtitle-single-line" id="subtitleLine">
+            <!-- Palabras inyectadas dinámicamente -->
         </div>
     </div>
 
-    <!-- LOWER THIRD FLOTANTE (ACTO 1 Y ACTO 3) -->
-    <div class="floating-lower-third" id="floatingLowerThird">
-        <div class="lt-header">
-            <span class="lt-badge" id="ltKicker">{{ visuals.kicker }}</span>
-            <span class="lt-brand">
-                <span class="lt-live-dot"></span>
-                SALADILLO VIVO
-            </span>
-        </div>
-        <div class="lt-content-wrap">
-            <h2 class="lt-headline" id="ltHeadline">{{ visuals.titular_apertura }}</h2>
-        </div>
-        <div class="lt-progress-track">
-            <div class="lt-progress-bar" id="ltProgressBar"></div>
-        </div>
+    <!-- BARRA ULTRA FINA DE PROGRESO GLOBAL -->
+    <div class="progress-line-track">
+        <div class="progress-line-fill" id="progressLineFill"></div>
     </div>
 
     {% if audio_url %}
@@ -1254,82 +1144,89 @@ class SlideGeneratorAgent:
         (function() {
             var audio = document.getElementById('slideAudio');
             var slides = document.querySelectorAll('.photo-slide');
-            var rackFocus = document.getElementById('rackFocusLayer');
-            var centralCard = document.getElementById('centralCard');
-            var lowerThird = document.getElementById('floatingLowerThird');
-            var ltHeadline = document.getElementById('ltHeadline');
-            var ltProgressBar = document.getElementById('ltProgressBar');
-            var cardProgressBar = document.getElementById('cardProgressBar');
+            var lineEl = document.getElementById('subtitleLine');
+            var progressFill = document.getElementById('progressLineFill');
 
-            var titularApertura = {{ visuals.titular_apertura | tojson }};
-            var remateCierre = {{ visuals.remate | tojson }};
-            var estimatedDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
-            var activeDuration = estimatedDuration;
-            var isShortMode = (activeDuration <= 8.5);
-            var currentStage = 0; // 1: Apertura (Lower Third), 2: Placa Central, 3: Remate (Lower Third)
+            var timedLines = {{ timed_lines | tojson }};
+            var baseDuration = {{ (audio_duration | round(1)) if audio_duration else 36 }};
+            var activeDuration = baseDuration;
+            var currentLineIndex = -1;
+            var currentWordsEls = [];
             var slideInterval = null;
             var hasParentUpdates = false;
             var startTime = performance.now();
 
-            function updateTimeline(currentTime, totalDuration) {
-                if (!totalDuration || totalDuration <= 0) return;
-                var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
-
-                if (isShortMode) {
-                    // Modo Flash Directo (<= 8.5s): Lower third permanente, foto limpia con Ken Burns
-                    if (currentStage !== 1) {
-                        currentStage = 1;
-                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
-                        if (ltHeadline) ltHeadline.textContent = titularApertura;
-                        if (rackFocus) rackFocus.classList.remove('active');
-                        if (centralCard) centralCard.classList.remove('visible-stage');
-                    }
-                    if (ltProgressBar) {
-                        ltProgressBar.style.width = Math.min(100, Math.round(ratio * 100)) + '%';
-                    }
+            function renderLine(lineIdx) {
+                if (lineIdx < 0 || lineIdx >= timedLines.length) {
+                    if (lineEl) lineEl.innerHTML = '';
+                    currentWordsEls = [];
+                    currentLineIndex = lineIdx;
                     return;
                 }
+                currentLineIndex = lineIdx;
+                var lineData = timedLines[lineIdx];
+                if (!lineEl) return;
 
-                // Modo 3 Actos TV-Grade (> 8.5s)
-                // ACTO 1 (0% a 28%): Foto nítida con Ken Burns + LOWER THIRD de apertura
-                if (ratio < 0.28) {
-                    if (currentStage !== 1) {
-                        currentStage = 1;
-                        if (rackFocus) rackFocus.classList.remove('active');
-                        if (centralCard) centralCard.classList.remove('visible-stage');
-                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
-                        if (ltHeadline) ltHeadline.textContent = titularApertura;
-                    }
-                    var actProgress = ratio / 0.28;
-                    if (ltProgressBar) {
-                        ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+                lineEl.innerHTML = '';
+                currentWordsEls = [];
+
+                for (var i = 0; i < lineData.words.length; i++) {
+                    var wData = lineData.words[i];
+                    var span = document.createElement('span');
+                    span.className = 'word-token';
+                    span.textContent = wData.w;
+                    span.dataset.s = wData.s;
+                    span.dataset.e = wData.e;
+                    lineEl.appendChild(span);
+                    currentWordsEls.push({
+                        el: span,
+                        s: wData.s,
+                        e: wData.e
+                    });
+                }
+            }
+
+            function updateSubtitles(currentTime, totalDuration) {
+                if (!totalDuration || totalDuration <= 0) return;
+                var ratio = Math.max(0, Math.min(1.0, currentTime / totalDuration));
+                if (progressFill) {
+                    progressFill.style.width = (ratio * 100).toFixed(1) + '%';
+                }
+
+                // Escalar tiempo relativo a la duración base calculada
+                var timeScale = (baseDuration > 0) ? (totalDuration / baseDuration) : 1.0;
+                var effectiveTime = (timeScale > 0) ? (currentTime / timeScale) : currentTime;
+
+                // Buscar la línea correspondiente al instante de audio
+                var foundLineIdx = -1;
+                for (var i = 0; i < timedLines.length; i++) {
+                    var l = timedLines[i];
+                    if (effectiveTime >= l.start && effectiveTime <= l.end) {
+                        foundLineIdx = i;
+                        break;
+                    } else if (effectiveTime < l.start) {
+                        if (i === 0) foundLineIdx = 0;
+                        else foundLineIdx = i - 1;
+                        break;
                     }
                 }
-                // ACTO 2 (28% a 72%): RACK FOCUS sobre la foto + PLACA CENTRAL EDITORIAL
-                else if (ratio < 0.72) {
-                    if (currentStage !== 2) {
-                        currentStage = 2;
-                        if (lowerThird) lowerThird.classList.add('hidden-stage');
-                        if (rackFocus) rackFocus.classList.add('active');
-                        if (centralCard) centralCard.classList.add('visible-stage');
-                    }
-                    var phaseRatio = (ratio - 0.28) / (0.72 - 0.28);
-                    if (cardProgressBar) {
-                        cardProgressBar.style.width = Math.min(100, Math.round(phaseRatio * 100)) + '%';
-                    }
+                if (foundLineIdx === -1 && timedLines.length > 0) {
+                    foundLineIdx = timedLines.length - 1;
                 }
-                // ACTO 3 (72% a 100%): Retorno a foto nítida + LOWER THIRD con remate final
-                else {
-                    if (currentStage !== 3) {
-                        currentStage = 3;
-                        if (rackFocus) rackFocus.classList.remove('active');
-                        if (centralCard) centralCard.classList.remove('visible-stage');
-                        if (lowerThird) lowerThird.classList.remove('hidden-stage');
-                        if (ltHeadline) ltHeadline.textContent = remateCierre;
-                    }
-                    var actProgress = (ratio - 0.72) / (1.0 - 0.72);
-                    if (ltProgressBar) {
-                        ltProgressBar.style.width = Math.min(100, Math.round(actProgress * 100)) + '%';
+
+                if (foundLineIdx !== currentLineIndex) {
+                    renderLine(foundLineIdx);
+                }
+
+                // Resaltar palabras en la línea activa según el ritmo del audio
+                for (var j = 0; j < currentWordsEls.length; j++) {
+                    var item = currentWordsEls[j];
+                    if (effectiveTime > item.e) {
+                        item.el.className = 'word-token spoken';
+                    } else if (effectiveTime >= item.s && effectiveTime <= item.e) {
+                        item.el.className = 'word-token active-speaking';
+                    } else {
+                        item.el.className = 'word-token';
                     }
                 }
             }
@@ -1337,7 +1234,6 @@ class SlideGeneratorAgent:
             function applyDuration(durSec) {
                 if (!durSec || !isFinite(durSec) || durSec <= 0) return;
                 activeDuration = Math.round(durSec * 10) / 10;
-                isShortMode = (activeDuration <= 8.5);
                 document.documentElement.style.setProperty('--slide-audio-duration', activeDuration + 's');
 
                 if (slides && slides.length > 1) {
@@ -1357,7 +1253,12 @@ class SlideGeneratorAgent:
                 }
             }
 
-            // 1. Reproducción de Audio Interno y Fallback de Autoplay
+            // Inicializar con la primera línea
+            if (timedLines.length > 0) {
+                renderLine(0);
+            }
+
+            // 1. Audio interno y autoplay fallback
             if (audio) {
                 audio.addEventListener('loadedmetadata', function() {
                     if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
@@ -1367,17 +1268,16 @@ class SlideGeneratorAgent:
 
                 audio.addEventListener('timeupdate', function() {
                     if (!hasParentUpdates && audio.duration > 0) {
-                        updateTimeline(audio.currentTime, audio.duration);
+                        updateSubtitles(audio.currentTime, audio.duration);
                     }
                 });
 
-                // Intentar reproducción automática
                 var playPromise = audio.play();
                 if (playPromise !== undefined) {
                     playPromise.then(function() {
                         console.log("Audio de slide reproduciendo exitosamente.");
                     }).catch(function(err) {
-                        console.warn("Autoplay restringido por el navegador. Habilitando al interactuar:", err);
+                        console.warn("Autoplay restringido por navegador:", err);
                         var unlockAudio = function() {
                             if (!hasParentUpdates) {
                                 audio.play();
@@ -1391,7 +1291,7 @@ class SlideGeneratorAgent:
                 }
             }
 
-            // 2. Escuchar mensajes del reproductor padre (VideoSection / NewsSlidePlayer)
+            // 2. Escuchar mensajes del reproductor padre (VideoSection)
             window.addEventListener('message', function(e) {
                 if (!e.data) return;
                 if ((e.data.type === 'SET_AUDIO_DURATION' || e.data.action === 'SET_AUDIO_DURATION') && e.data.duration) {
@@ -1399,7 +1299,6 @@ class SlideGeneratorAgent:
                 }
                 if (e.data.type === 'AUDIO_TIME_UPDATE') {
                     hasParentUpdates = true;
-                    // Si el reproductor padre ya está emitiendo el audio, silenciar audio interno para evitar eco
                     if (audio && !audio.muted) {
                         audio.muted = true;
                         audio.pause();
@@ -1408,25 +1307,25 @@ class SlideGeneratorAgent:
                         applyDuration(e.data.duration);
                     }
                     var cur = (typeof e.data.currentTime === 'number') ? e.data.currentTime : 0;
-                    updateTimeline(cur, activeDuration);
+                    updateSubtitles(cur, activeDuration);
                 }
             });
 
-            // 3. Reloj autónomo infalible de respaldo (garantiza que NUNCA se congele)
+            // 3. Reloj autónomo infalible de respaldo
             function autonomousLoop(now) {
                 if (!hasParentUpdates) {
                     if (audio && !audio.paused && audio.duration > 0) {
-                        updateTimeline(audio.currentTime, audio.duration);
+                        updateSubtitles(audio.currentTime, audio.duration);
                     } else {
                         var elapsed = (now - startTime) / 1000;
-                        updateTimeline(elapsed % (activeDuration + 0.1), activeDuration);
+                        updateSubtitles(elapsed % (activeDuration + 0.1), activeDuration);
                     }
                 }
                 requestAnimationFrame(autonomousLoop);
             }
             requestAnimationFrame(autonomousLoop);
 
-            // Inicialización de rotación proporcional si hay múltiples fotos
+            // Inicialización de rotación proporcional de fotos
             if (slides && slides.length > 1 && !slideInterval) {
                 var initialPhotoDur = Math.round(({{ (photo_duration | round(1)) if photo_duration else 15 }}) * 1000);
                 var currentIndex = 0;
@@ -1450,10 +1349,10 @@ class SlideGeneratorAgent:
                 images=images or [],
                 audio_duration=audio_duration,
                 photo_duration=photo_duration,
-                visuals=visuals
+                visuals=visuals,
+                timed_lines=timed_lines
             )
         else:
-            # Fallback simple sin jinja2
             first_img = images[0] if images else {"url": "https://saladillovivo.vercel.app/default-og-image.png", "focal_x": 50, "focal_y": 45}
             img_url = first_img.get("url", first_img) if isinstance(first_img, dict) else first_img
             fx = first_img.get("focal_x", 50) if isinstance(first_img, dict) else 50
@@ -1464,13 +1363,8 @@ class SlideGeneratorAgent:
             html = html.replace("{{ (audio_duration | round(1)) if audio_duration else 36 }}", dur_str)
             html = html.replace("{{ (photo_duration | round(1)) if photo_duration else 15 }}", photo_dur_str)
             html = html.replace("{{ img.url if img.url is defined else img }}", img_url).replace("{{ img.focal_x if img.focal_x is defined else 50 }}", str(fx)).replace("{{ img.focal_y if img.focal_y is defined else 45 }}", str(fy))
-            html = html.replace("{{ visuals.titular_apertura | tojson }}", json.dumps(visuals.get("titular_apertura", title)))
-            html = html.replace("{{ visuals.remate | tojson }}", json.dumps(visuals.get("remate", "Más detalles en saladillovivo.com.ar")))
             html = html.replace("{{ visuals.kicker }}", visuals.get("kicker", "SALADILLO VIVO"))
-            html = html.replace("{{ visuals.titular_apertura }}", visuals.get("titular_apertura", title))
-            html = html.replace("{{ visuals.placa.destacado }}", str(visuals.get("placa", {}).get("destacado", title)))
-            html = html.replace("{{ visuals.placa.bajada }}", str(visuals.get("placa", {}).get("bajada", "")))
-            html = html.replace("{{ visuals.placa.titulo }}", str(visuals.get("placa", {}).get("titulo", "INFORMACIÓN")))
+            html = html.replace("{{ timed_lines | tojson }}", json.dumps(timed_lines))
             return html
 
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:

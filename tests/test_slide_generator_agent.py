@@ -7,7 +7,7 @@ class SlideGeneratorAgentTests(unittest.TestCase):
     def setUp(self):
         self.agent = SlideGeneratorAgent()
 
-    def test_slide_contains_ken_burns_lower_third_and_audio(self):
+    def test_slide_contains_ken_burns_single_line_karaoke_and_audio(self):
         title = "Saladillo: Pavimentación y Obras Viales"
         text = "El intendente recorrió las obras de pavimentación con una inversión de 30 millones de pesos."
         audio_url = "https://example.com/audio.mp3"
@@ -22,20 +22,23 @@ class SlideGeneratorAgentTests(unittest.TestCase):
             audio_duration=25.0
         )
 
-        # 1. Animación Ken Burns
+        # 1. Animación Ken Burns y foto 100% nítida
         self.assertIn("kenBurnsZoom", html)
         self.assertIn("photo-main", html)
         self.assertNotIn("no-ken-burns", html)
 
-        # 2. Lower Thirds
-        self.assertIn("floating-lower-third", html)
-        self.assertIn("ltHeadline", html)
-        self.assertIn("ltKicker", html)
-        self.assertIn("ltProgressBar", html)
+        # 2. Sin Lower Thirds flotantes ni placas invasivas
+        self.assertNotIn("floating-lower-third", html)
+        self.assertNotIn("central-card", html)
+        self.assertNotIn("rack-focus-layer", html)
 
-        # 3. Placa Central con Rack Focus
-        self.assertIn("central-card", html)
-        self.assertIn("rack-focus-layer", html)
+        # 3. Subtitulado en una sola línea y karaoke dinámico sincronizado
+        self.assertIn("subtitle-stage", html)
+        self.assertIn("subtitle-single-line", html)
+        self.assertIn("word-token", html)
+        self.assertIn("timedLines", html)
+        self.assertIn("updateSubtitles", html)
+        self.assertIn("active-speaking", html)
 
         # 4. Audio con autoplay y play()
         self.assertIn('id="slideAudio"', html)
@@ -47,16 +50,18 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         images = self.agent.process_images_for_slide(102, [])
         self.assertTrue(images[0]["enable_ken_burns"])
 
-    def test_short_mode_timing(self):
-        html = self.agent.create_slide_html(
-            article_id=103,
-            title="Breve noticia",
-            text="Texto muy corto.",
-            audio_url="https://example.com/a.mp3",
-            images=[{"url": "https://example.com/f.jpg"}],
-            audio_duration=6.0
-        )
-        self.assertIn("isShortMode", html)
+    def test_generate_timed_subtitles_structure(self):
+        text = "La Municipalidad comenzó los trabajos en el barrio esperanza."
+        lines = self.agent.generate_timed_subtitles(text, 15.0)
+        self.assertGreater(len(lines), 0)
+        first_line = lines[0]
+        self.assertIn("words", first_line)
+        self.assertIn("start", first_line)
+        self.assertIn("end", first_line)
+        self.assertGreater(len(first_line["words"]), 0)
+        first_word = first_line["words"][0]
+        self.assertEqual(first_word["w"], "La")
+        self.assertGreaterEqual(first_word["s"], 0.4)
 
 
 if __name__ == "__main__":
