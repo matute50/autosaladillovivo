@@ -911,6 +911,8 @@ class SlideGeneratorAgent:
             --color-primary-light: #0055ff;
             --color-accent-sky: #38bdf8;
             --color-speaking-gold: #facc15;
+            /* Factor de velocidad del efecto Ken Burns: 0.7 = ciclo suave por foto */
+            --kb-speed: 0.7;
         }
 
         * {
@@ -982,13 +984,14 @@ class SlideGeneratorAgent:
             backface-visibility: hidden;
             transform: translateZ(0);
             will-change: transform;
-            animation: {% if images and images | length > 1 %}kenBurnsPhoto var(--slide-photo-duration, 15s){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
+            /* Ken Burns: usar --kb-speed (0.7) para suavizar el zoom por foto */
+            animation: {% if images and images | length > 1 %}kenBurnsPhoto calc(var(--slide-photo-duration, 15s) * var(--kb-speed, 0.7)){% else %}kenBurnsZoom var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite;
         }
 
         /* BANNERS / AFICHES */
         .photo-slide.is-banner .photo-main {
             object-fit: contain !important;
-            animation: kenBurnsBanner {% if images and images | length > 1 %}var(--slide-photo-duration, 15s){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
+            animation: kenBurnsBanner {% if images and images | length > 1 %}calc(var(--slide-photo-duration, 15s) * var(--kb-speed, 0.7)){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
         }
 
         @keyframes kenBurnsBanner {
@@ -1313,6 +1316,8 @@ class SlideGeneratorAgent:
                 if (slides && slides.length > 1) {
                     var photoDur = Math.round((activeDuration / slides.length) * 10) / 10;
                     document.documentElement.style.setProperty('--slide-photo-duration', photoDur + 's');
+                    // Reducir velocidad Ken Burns a 70% del tiempo por foto para un ciclo suave
+                    document.documentElement.style.setProperty('--kb-speed', '0.7');
 
                     if (slideInterval) clearInterval(slideInterval);
                     var durationPerSlideMs = Math.round(photoDur * 1000);
