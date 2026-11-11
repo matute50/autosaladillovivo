@@ -1028,6 +1028,15 @@ class SlideGeneratorAgent:
             100% { transform: scale(1.0); }
         }
 
+        /* FOTO ÚNICA: ciclo completo zoom in → pausa 2s → zoom out. Los porcentajes de parada
+           se recalculan en JS según la duración real del audio (applySinglePhotoKenBurns). */
+        @keyframes kenBurnsSinglePhoto {
+            0% { transform: scale(1.0); }
+            40% { transform: scale(1.22); }
+            55% { transform: scale(1.22); }
+            100% { transform: scale(1.0); }
+        }
+
         /* Gradiente cinemático inferior para lectura perfecta sin tapar la foto */
         .bottom-gradient-scrim {
             position: absolute;
@@ -1245,8 +1254,11 @@ class SlideGeneratorAgent:
             rotationOrder.push(0); // volver a la imagen principal al final
             var nextRotationIndex = 1; // ya estamos en el índice 0, siguiente avance = 1
             var segmentCount = slides.length + 1;
-            var photoDurMs = Math.round((baseDuration / segmentCount) * 1000);
+            // Con varias fotos el tiempo por segmento = total / (N+1). Con UNA sola foto el
+            // ciclo de Ken Burns (zoom in → pausa → zoom out) usa la duración completa del audio.
+            var photoDurMs = Math.round(((slides.length > 1 ? baseDuration / segmentCount : baseDuration)) * 1000);
             var lastPhotoTick = performance.now();
+            var singlePhotoTimer = null; // timer de la segunda fase (zoom out) en foto única
 
             // Si corre dentro del iframe de VideoSection, espera a que termine la animación NOTICIAS.
             // Si corre en pestaña directa o standalone, arranca de inmediato con autoplay.
@@ -1358,6 +1370,11 @@ class SlideGeneratorAgent:
                     }
                 } else {
                     document.documentElement.style.setProperty('--slide-photo-duration', activeDuration + 's');
+                    // Foto única: la animación usa la duración completa del audio.
+                    photoDurMs = Math.round(activeDuration * 1000);
+                    if (typeof activatePhoto === 'function' && prevPhotoDurMs !== photoDurMs) {
+                        activatePhoto(currentPhotoIndex);
+                    }
                 }
             }
 
@@ -1378,12 +1395,44 @@ class SlideGeneratorAgent:
                 slides[idx].classList.add('active');
                 var mainImg = slides[idx].querySelector('.photo-main');
                 if (mainImg) {
+                    if (slides.length === 1) {
+                        applySinglePhotoKenBurns(mainImg);
+                        return;
+                    }
                     var kbName = (idx % 2 === 0) ? 'kenBurnsZoomIn' : 'kenBurnsZoomOut';
                     var kbDur = (photoDurMs / 1000) + 's';
                     mainImg.style.animation = 'none';
                     void mainImg.offsetHeight; // forzar reflow para reiniciar la animación
                     mainImg.style.animation = kbName + ' ' + kbDur + ' ease-out forwards';
                 }
+            }
+
+            // FOTO ÚNICA: zoom in hacia el centro de atención → pausa de 2s → zoom out hasta
+            // la posición original. Los porcentajes de parada del keyframe kenBurnsSinglePhoto
+            // se recalculan según la duración real (photoDurMs) para que la pausa dure SIEMPRE
+            // 2000ms y el zoom in/out se repartan el tiempo restante a partes iguales.
+            function applySinglePhotoKenBurns(mainImg) {
+                var totalMs = Math.max(photoDurMs, 3000); // piso para no romper con audios cortos
+                var pauseMs = 2000;
+                var moveMs = (totalMs - pauseMs) / 2;
+                if (moveMs < 300) moveMs = 300;
+                var pctPause = (pauseMs / totalMs) * 100;
+                var pctMove = (100 - pctPause) / 2;
+                var st = document.getElementById('kbSingleStyle');
+                if (!st) {
+                    st = document.createElement('style');
+                    st.id = 'kbSingleStyle';
+                    document.head.appendChild(st);
+                }
+                st.textContent = '@keyframes kenBurnsSinglePhoto {'
+                    + '0%{transform:scale(1.0);}'
+                    + pctMove + '%{transform:scale(1.22);}'
+                    + (pctMove + pctPause) + '%{transform:scale(1.22);}'
+                    + '100%{transform:scale(1.0);}'
+                    + '}';
+                mainImg.style.animation = 'none';
+                void mainImg.offsetHeight;
+                mainImg.style.animation = 'kenBurnsSinglePhoto ' + (totalMs / 1000) + 's ease-out forwards';
             }
 
             // Auto-iniciar rotación de fotos: tick persistente de 100ms que recorre el orden

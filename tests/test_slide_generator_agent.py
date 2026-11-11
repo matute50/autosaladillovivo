@@ -184,9 +184,13 @@ class SlideGeneratorAgentTests(unittest.TestCase):
             audio_duration=20.0
         )
         self.assertIn("--slide-photo-duration: 20.0s", html)
-        # Foto única también debe recibir animación Ken Burns inline vía activatePhoto (>=1)
+        # Foto única: ciclo completo zoom in → pausa 2s → zoom out vía applySinglePhotoKenBurns
         self.assertIn("activatePhoto", html)
-        self.assertIn("kenBurnsZoomIn", html)
+        self.assertIn("applySinglePhotoKenBurns", html)
+        self.assertIn("kenBurnsSinglePhoto", html)
+        # La pausa de 2s es fija; el resto se reparte mitad zoom in / mitad zoom out
+        self.assertIn("var pauseMs = 2000;", html)
+        self.assertIn("kbSingleStyle", html)
 
 
 if __name__ == "__main__":
