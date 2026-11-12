@@ -499,18 +499,24 @@ const VideoSection: React.FC = () => {
           >
 
             {/* 1. SLIDE INTERACTIVO HTML (TV-GRADE con srcDoc para evitar bloqueo CSP default-src none de Supabase Storage) */}
-            {isNewsSlide && (slideHtmlContent || currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (
-              <div className="absolute inset-0 z-40 bg-black">
-                <iframe
-                  srcDoc={slideHtmlContent || undefined}
-                  src={slideHtmlContent ? undefined : (typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url))}
-                  className="w-full h-full border-none pointer-events-auto"
-                  title={typeof currentSlide === 'object' ? currentSlide?.title || currentVideo?.nombre || "Slide Noticia" : "Slide Noticia"}
-                  sandbox="allow-same-origin allow-scripts allow-forms"
-                  allow="autoplay; fullscreen"
-                />
-              </div>
-            )}
+            {/* key={rawUrl} garantiza que React DESMONTE el iframe anterior al cambiar de noticia.
+                Sin esto, el setInterval de rotación de fotos del slide viejo seguía corriendo
+                y mezclaba imágenes entre diferentes noticias. */}
+            {isNewsSlide && (slideHtmlContent || currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (() => {
+              const rawUrl = typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url);
+              return (
+                <div key={rawUrl} className="absolute inset-0 z-40 bg-black">
+                  <iframe
+                    srcDoc={slideHtmlContent || undefined}
+                    src={slideHtmlContent ? undefined : rawUrl}
+                    className="w-full h-full border-none pointer-events-auto"
+                    title={typeof currentSlide === 'object' ? currentSlide?.title || currentVideo?.nombre || "Slide Noticia" : "Slide Noticia"}
+                    sandbox="allow-same-origin allow-scripts allow-forms"
+                    allow="autoplay; fullscreen"
+                  />
+                </div>
+              );
+            })()}
 
             {/* 2. NOTICIA CON FOTO Y AUDIO (CUANDO NO HAY SLIDE HTML PERO SÍ FOTO/AUDIO) */}
             {isNewsImageAudio && (

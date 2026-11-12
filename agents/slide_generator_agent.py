@@ -1488,6 +1488,22 @@ class SlideGeneratorAgent:
                 }, 100);
             }
 
+            // CLEANUP: Cuando el iframe se desmonta o cambia la página, limpiar timers
+            // para evitar que sigan corriendo en segundo plano y mezclando fotos.
+            function destroySlide() {
+                if (slideInterval) { clearInterval(slideInterval); slideInterval = null; }
+                if (singlePhotoTimer) { clearTimeout(singlePhotoTimer); singlePhotoTimer = null; }
+                document.removeEventListener('visibilitychange', onVisibilityChange);
+                window.removeEventListener('pagehide', destroySlide);
+                window.removeEventListener('beforeunload', destroySlide);
+            }
+            function onVisibilityChange() {
+                if (document.hidden) destroySlide();
+            }
+            document.addEventListener('visibilitychange', onVisibilityChange);
+            window.addEventListener('pagehide', destroySlide);
+            window.addEventListener('beforeunload', destroySlide);
+
             // Sincronización centralizada: solo escucha eventos del reproductor padre (VideoSection)
             // El audio se reproduce en el elemento <audio> centralizado de VideoSection.tsx;
             // este iframe NO genera su propio <audio> para evitar doble reproducción/eco.
