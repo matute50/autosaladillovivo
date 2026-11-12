@@ -24,6 +24,7 @@ import random
 import hashlib
 import logging
 import asyncio
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Union
@@ -57,8 +58,6 @@ try:
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
-except ImportError:
-    HAS_PIL = False
 
 try:
     from gtts import gTTS
@@ -86,6 +85,10 @@ logger.setLevel(logging.INFO)
 
 
 class SlideGeneratorAgent:
+    # Constantes de retry para uploads a Supabase Storage
+    MAX_UPLOAD_RETRIES: int = 3
+    UPLOAD_BACKOFF_BASE: float = 2.0
+
     def estimate_audio_duration(self, text: str) -> float:
         """
         Calcula una estimación PROVISIONAL de la duración del audio en segundos.
@@ -612,7 +615,9 @@ class SlideGeneratorAgent:
         return None
 
     def upload_audio_to_supabase(self, audio_bytes: bytes, filename: str) -> Optional[str]:
-        """Sube un archivo de audio MP3 al bucket 'audios' de Supabase Storage."""
+        """Sube un archivo de audio MP3 al bucket 'audios' de Supabase Storage.
+        Reintenta hasta MAX_UPLOAD_RETRIES veces con backoff exponencial ante errores de red.
+        """
         if not HAS_REQUESTS or not self.supabase_key or not audio_bytes:
             return None
         try:
@@ -635,11 +640,34 @@ class SlideGeneratorAgent:
 
             upload_url = f"{self.supabase_url}/storage/v1/object/audios/{filename}"
             headers = self._get_storage_headers("audio/mpeg")
-            resp = requests.post(upload_url, headers=headers, data=audio_bytes, timeout=25)
-            if resp.status_code in (200, 201):
-                return f"{self.supabase_url}/storage/v1/object/public/audios/{filename}"
+            for attempt in range(1, self.MAX_UPLOAD_RETRIES + 1):
+                try:
+                    resp = requests.post(upload_url, headers=headers, data=audio_bytes, timeout=25)
+                    if resp.status_code in (200, 201):
+                        return f"{self.supabase_url}/storage/v1/object/public/audios/{filename}"
+                    # Codigos transitorios: reintentar
+                    if resp.status_code in (429, 500, 502, 503, 504):
+                        delay = min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0)
+                        self.logger.warning(
+                            f"Upload audio retornó {resp.status_code} ({resp.text[:80]}). "
+                            f"Reintento {attempt}/{self.MAX_UPLOAD_RETRIES} en {delay:.1f}s."
+                        )
+                        time.sleep(delay)
+                        continue
+                    self.logger.error(f"Error subiendo audio a Supabase REST ({resp.status_code}): {resp.text[:200]}")
+                    break
+                except requests.exceptions.Timeout:
+                    self.logger.warning(f"Timeout en subida de audio. Reintento {attempt}/{self.MAX_UPLOAD_RETRIES}")
+                    time.sleep(min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0))
+                except requests.exceptions.ConnectionError as e:
+                    self.logger.warning(f"Error de conexión en subida de audio: {e}. "
+                                       f"Reintento {attempt}/{self.MAX_UPLOAD_RETRIES}")
+                    time.sleep(min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0))
+                except Exception as e:
+                    self.logger.error(f"Error inesperado subiendo audio a Supabase Storage: {e}")
+                    break
         except Exception as e:
-            self.logger.warning(f"Error subiendo audio a Supabase Storage: {e}")
+            self.logger.error(f"Error fatal subiendo audio a Supabase Storage: {e}")
         return None
 
     def process_images_for_slide(self, article_id: Union[int, str], image_urls: List[str]) -> List[Dict]:
@@ -1543,6 +1571,7 @@ class SlideGeneratorAgent:
     def upload_slide_to_supabase(self, html_content: str, filename: str) -> Optional[str]:
         """
         Sube el slide HTML generado a Supabase Storage (bucket 'slides') y retorna la URL pública.
+        Reintenta hasta MAX_UPLOAD_RETRIES veces con backoff exponencial ante errores de red.
         """
         # 1. Guardar copia local de respaldo
         local_path = self.storage_path / filename
@@ -1554,41 +1583,65 @@ class SlideGeneratorAgent:
 
         # 2. Subida vía cliente oficial Supabase (SDK) si está configurado
         if self.supabase:
-            try:
-                storage_obj = self.supabase.storage.from_(self.bucket_name)
-                # Intentar upload con upsert
-                html_bytes = html_content.encode('utf-8')
+            for attempt in range(1, self.MAX_UPLOAD_RETRIES + 1):
                 try:
-                    storage_obj.upload(
-                        path=filename,
-                        file=html_bytes,
-                        file_options={"content-type": "text/html; charset=utf-8", "upsert": "true"}
-                    )
-                except Exception:
-                    # En versiones de supabase-py que no admiten file_options como dict
-                    storage_obj.upload(path=filename, file=html_bytes)
+                    storage_obj = self.supabase.storage.from_(self.bucket_name)
+                    # Intentar upload con upsert
+                    html_bytes = html_content.encode('utf-8')
+                    try:
+                        storage_obj.upload(
+                            path=filename,
+                            file=html_bytes,
+                            file_options={"content-type": "text/html; charset=utf-8", "upsert": "true"}
+                        )
+                    except Exception:
+                        # En versiones de supabase-py que no admiten file_options como dict
+                        storage_obj.upload(path=filename, file=html_bytes)
 
-                public_url = storage_obj.get_public_url(filename)
-                if public_url:
-                    self.logger.info(f"Slide subido exitosamente vía SDK: {public_url}")
-                    return public_url
-            except Exception as e:
-                self.logger.warning(f"Fallo upload vía SDK, intentando vía REST API: {e}")
+                    public_url = storage_obj.get_public_url(filename)
+                    if public_url:
+                        self.logger.info(f"Slide subido exitosamente vía SDK: {public_url}")
+                        return public_url
+                    break
+                except Exception as e:
+                    self.logger.warning(f"Fallo upload vía SDK (intent {attempt}/{self.MAX_UPLOAD_RETRIES}): {e}")
+                    if attempt < self.MAX_UPLOAD_RETRIES:
+                        time.sleep(min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0))
+                        continue
+                    self.logger.error(f"Agotados reintentos SDK para slide {filename}")
 
         # 3. Fallback directo a REST API de Supabase Storage
         if HAS_REQUESTS and self.supabase_key:
-            try:
-                upload_url = f"{self.supabase_url}/storage/v1/object/{self.bucket_name}/{filename}"
-                headers = self._get_storage_headers("text/html; charset=utf-8")
-                resp = requests.post(upload_url, headers=headers, data=html_content.encode('utf-8'), timeout=25)
-                if resp.status_code in (200, 201):
-                    public_url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{filename}"
-                    self.logger.info(f"Slide subido exitosamente vía REST: {public_url}")
-                    return public_url
-                else:
-                    self.logger.error(f"Error subiendo slide a Supabase REST ({resp.status_code}): {resp.text}")
-            except Exception as e:
-                self.logger.error(f"Excepción en subida REST a Supabase Storage: {e}")
+            for attempt in range(1, self.MAX_UPLOAD_RETRIES + 1):
+                try:
+                    upload_url = f"{self.supabase_url}/storage/v1/object/{self.bucket_name}/{filename}"
+                    headers = self._get_storage_headers("text/html; charset=utf-8")
+                    resp = requests.post(upload_url, headers=headers, data=html_content.encode('utf-8'), timeout=25)
+                    if resp.status_code in (200, 201):
+                        public_url = f"{self.supabase_url}/storage/v1/object/public/{self.bucket_name}/{filename}"
+                        self.logger.info(f"Slide subido exitosamente vía REST: {public_url}")
+                        return public_url
+                    # Codigos transitorios: reintentar
+                    if resp.status_code in (429, 500, 502, 503, 504):
+                        delay = min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0)
+                        self.logger.warning(
+                            f"REST upload slide retornó {resp.status_code}. "
+                            f"Reintento {attempt}/{self.MAX_UPLOAD_RETRIES} en {delay:.1f}s."
+                        )
+                        time.sleep(delay)
+                        continue
+                    self.logger.error(f"Error subiendo slide a Supabase REST ({resp.status_code}): {resp.text[:200]}")
+                    break
+                except requests.exceptions.Timeout:
+                    self.logger.warning(f"Timeout en subida de slide. Reintento {attempt}/{self.MAX_UPLOAD_RETRIES}")
+                    time.sleep(min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0))
+                except requests.exceptions.ConnectionError as e:
+                    self.logger.warning(f"Error de conexión en subida de slide: {e}. "
+                                       f"Reintento {attempt}/{self.MAX_UPLOAD_RETRIES}")
+                    time.sleep(min(self.UPLOAD_BACKOFF_BASE ** attempt, 30.0))
+                except Exception as e:
+                    self.logger.error(f"Error inesperado subiendo slide a Supabase Storage: {e}")
+                    break
 
         return None
 
@@ -1605,6 +1658,20 @@ class SlideGeneratorAgent:
         5. Subida al bucket 'slides' de Supabase Storage
         6. Retorna la URL pública del slide
         """
+        # Validación temprana de inputs
+        if not article_id:
+            self.logger.error("process_article_slide: article_id vacío")
+            return None
+        cleaned_text = (text or "").strip()
+        if not cleaned_text:
+            self.logger.error(f"process_article_slide: texto vacío para artículo {article_id}")
+            return None
+        if len(cleaned_text) < 10:
+            self.logger.warning(
+                f"process_article_slide: texto muy corto ({len(cleaned_text)} chars) "
+                f"para artículo {article_id}. El slide podría quedar incompleto."
+            )
+
         self.logger.info(f"Generando slide para artículo {article_id}: \"{title[:40]}...\"")
 
         try:
