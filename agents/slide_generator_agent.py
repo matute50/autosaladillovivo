@@ -1112,7 +1112,7 @@ class SlideGeneratorAgent:
             will-change: color, transform;
         }
 
-        /* Palabra activa en el instante de locución */
+        /* Palabra activa en el instante de locución — rojo exacto del logo */
         .word-token.active-speaking {
             color: var(--sv-red) !important;
             font-weight: 900 !important;
@@ -1128,20 +1128,20 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
         }
 
-        /* LÍNEA INSTITUCIONAL DE PROMO — estilo rojo broadcast */
+        /* LÍNEA INSTITUCIONAL DE PROMO — misma paleta: activa roja, futuras celestes */
         .subtitle-single-line.is-promo-line .word-token.active-speaking {
-            color: var(--sv-blue) !important;
+            color: var(--sv-red) !important;
             font-weight: 900 !important;
             transform: scale(1.09) translateY(-1px);
-            text-shadow: 0 0 16px rgba(0, 51, 153, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
+            text-shadow: 0 0 16px rgba(239, 68, 68, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
         }
         .subtitle-single-line.is-promo-line .word-token.spoken {
-            color: rgba(0, 51, 153, 0.75) !important;
+            color: rgba(56, 189, 248, 0.85) !important;
             font-weight: 700;
             opacity: 0.9;
         }
         .subtitle-single-line.is-promo-line .word-token {
-            color: rgba(0, 51, 153, 0.35);
+            color: rgba(56, 189, 248, 0.35);
         }
 
         /* Barra de progreso global sutil */
