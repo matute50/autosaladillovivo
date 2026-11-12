@@ -25,7 +25,7 @@ def preprocess_rioplatense(text: str) -> str:
     processed = re.sub(r's(?!h)(?=[bcdfghjklmnpqrstvwxyz])', 'hs', processed)
     processed = re.sub(r's(?=\s|$|[.,;:!?])', 'hs', processed)
 
-    # Tag tonal obligatorio: se antepone AL FINAL, intacto (nunca se reescribe fonéticamente)
+    # Tag tonal obligatorio: se antepone AL INICIO, intacto (nunca se reescribe fonéticamente)
     processed = f"[relaxed, colloquial tone, argentinian rioplatense accent, mild s-aspiration] {processed}"
     return processed
 
