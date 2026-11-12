@@ -749,7 +749,6 @@ const VideoSection: React.FC = () => {
                     src="/videos_intro/noticias.mp4?v=20b"
                     autoPlay
                     playsInline
-                    muted
                     className="w-full h-full object-contain"
                     onEnded={() => {
                       setIsNewsIntroActive(false);
