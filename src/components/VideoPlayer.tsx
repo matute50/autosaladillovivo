@@ -331,7 +331,10 @@ export default function VideoPlayer({
           height="100%"
           progressInterval={500}
           onEnded={() => {
-            if (id !== 'live-stream' && onClose) {
+            // Solo permitir que onEnded dispare onClose si el jugador está reproduciendo activamente.
+            // Cuando hay un slide de noticias activo, finalPlaying es false y no debemos
+            // reanudar/interrumpir el reproductor principal (evita que YouTube se reinicie).
+            if (finalPlaying && id !== 'live-stream' && onClose) {
               onClose();
             }
           }}

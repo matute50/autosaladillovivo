@@ -527,7 +527,9 @@ const VideoSection: React.FC = () => {
                     muted={activeSlot !== 'A' || !isPlaying || !isContentPlaying || isNewsSlide || isNewsImageAudio}
                     imageUrl={slotAVideo.imagen}
                     onClose={() => {
-                      if (activeSlot === 'A' && !transitionSignaledRef.current && slotAVideo?.id !== 'live-stream') {
+                      // No reanudar el video principal si hay un slide de noticias activo en curso;
+                      // la prioridad absoluta es que la noticia termine de reproducirse completa.
+                      if (activeSlot === 'A' && !transitionSignaledRef.current && slotAVideo?.id !== 'live-stream' && !isNewsSlide && !isNewsImageAudio) {
                         handleOnEnded(setVolume, unmute);
                       }
                     }}
