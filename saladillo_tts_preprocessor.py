@@ -4,6 +4,12 @@ try:
 except ImportError:
     apply_audio_glossary = lambda t: t
 
+try:
+    from constants.tts_tags import RIOP_LATENT_TAG
+except ImportError:
+    # Fallback si constants no está disponible (ej: ejecución directa del script)
+    RIOP_LATENT_TAG = "[relaxed, colloquial tone, argentinian rioplatense accent, mild s-aspiration]"
+
 def preprocess_rioplatense(text: str) -> str:
     if not text:
         return ""
@@ -26,7 +32,7 @@ def preprocess_rioplatense(text: str) -> str:
     processed = re.sub(r's(?=\s|$|[.,;:!?])', 'hs', processed)
 
     # Tag tonal obligatorio: se antepone AL INICIO, intacto (nunca se reescribe fonéticamente)
-    processed = f"[relaxed, colloquial tone, argentinian rioplatense accent, mild s-aspiration] {processed}"
+    processed = f"{RIOP_LATENT_TAG} {processed}"
     return processed
 
 from voxtral_tts import generate_audio_voxtral

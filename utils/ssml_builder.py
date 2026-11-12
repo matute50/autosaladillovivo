@@ -6,6 +6,8 @@ import re
 import random
 from typing import List
 
+from constants.tts_tags import RIOP_LATENT_TAG
+
 INSTITUTIONAL_CLOSINGS = [
     "En Saladillo Vivo. Dale play a la noticia.",
     "No lo leas, escuchálo, en Saladillo Vivo.",
@@ -19,7 +21,8 @@ INSTITUTIONAL_CLOSINGS = [
     "Cerrá los ojos, y escuchá Saladillo Vivo.",
 ]
 
-STYLE_TAG = "[relaxed, colloquial tone, argentinian rioplatense accent, mild s-aspiration]"
+# Alias por compatibilidad con código existente que referencie STYLE_TAG
+STYLE_TAG = RIOP_LATENT_TAG
 
 
 def apply_rioplatense_phonetics(text: str) -> str:
