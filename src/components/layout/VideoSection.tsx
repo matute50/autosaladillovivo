@@ -38,6 +38,8 @@ const VideoSection: React.FC = () => {
     pauseForSlide,
     resumeAfterSlide,
     finishIntro,
+    isPostNewsFadeIn,
+    isPostNewsMusical,
   } = usePlayerStore();
 
   const { currentSlide, isPlaying: isSlidePlaying, stopSlide, isNewsIntroActive, setIsNewsIntroActive, isSlideOpen, closeSlide } = useNewsPlayerStore();
@@ -514,10 +516,16 @@ const VideoSection: React.FC = () => {
               {/* SLOT A */}
               <div
                 className={cn(
-                  "absolute inset-0 transition-opacity duration-700 ease-in-out",
+                  "absolute inset-0 transition-opacity ease-in-out",
+                  // When in post-news phase and the musical interlude is playing, animate fade-in of the active slot
+                  isPostNewsFadeIn && isPostNewsMusical && activeSlot === 'A'
+                    ? "opacity-0 animate-[fade-in-300s_0.3s_ease-in-out_forwards]"
+                    : isPostNewsFadeIn
+                      ? "duration-300 opacity-0"
+                      : "duration-700 opacity-100",
                   activeSlot === 'A'
-                    ? "z-10 opacity-100 pointer-events-auto"
-                    : "z-0 opacity-100 pointer-events-none"
+                    ? "z-10 pointer-events-auto"
+                    : "z-0 pointer-events-none"
                 )}
                 data-slot="A"
               >
@@ -548,6 +556,7 @@ const VideoSection: React.FC = () => {
                     startAt={slotAVideo.id === lastProcessedVideoIdRef.current ? undefined : (slotAVideo.novedad ? 0 : undefined)}
                     volumen_extra={slotAVideo.volumen_extra}
                     audioUrl={slotAVideo.audioSourceUrl}
+                    isFadeIn={isPostNewsFadeIn}
                   />
                 )}
               </div>
@@ -555,10 +564,15 @@ const VideoSection: React.FC = () => {
               {/* SLOT B */}
               <div
                 className={cn(
-                  "absolute inset-0 transition-opacity duration-700 ease-in-out",
+                  "absolute inset-0 transition-opacity ease-in-out",
+                  isPostNewsFadeIn && isPostNewsMusical && activeSlot === 'B'
+                    ? "opacity-0 animate-[fade-in-300s_0.3s_ease-in-out_forwards]"
+                    : isPostNewsFadeIn
+                      ? "duration-300 opacity-0"
+                      : "duration-700 opacity-100",
                   activeSlot === 'B'
-                    ? "z-10 opacity-100 pointer-events-auto"
-                    : "z-0 opacity-100 pointer-events-none"
+                    ? "z-10 pointer-events-auto"
+                    : "z-0 pointer-events-none"
                 )}
                 data-slot="B"
               >
@@ -589,6 +603,7 @@ const VideoSection: React.FC = () => {
                     startAt={slotBVideo.id === lastProcessedVideoIdRef.current ? undefined : (slotBVideo.novedad ? 0 : undefined)}
                     volumen_extra={slotBVideo.volumen_extra}
                     audioUrl={slotBVideo.audioSourceUrl}
+                    isFadeIn={isPostNewsFadeIn}
                   />
                 )}
               </div>

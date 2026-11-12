@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getVideosForHome, getNewRandomVideo, getVideoByUrl } from '@/lib/data';
+import { getVideosForHome, getNewRandomVideo, getVideoByUrl, getRandomMusicalVideo } from '@/lib/data';
 import { SlideMedia } from '@/lib/types';
 
 import { useNewsPlayerStore } from './useNewsPlayerStore';
@@ -28,6 +28,10 @@ interface PlayerState {
     isPreRollOverlayActive: boolean;
     overlayIntroVideo: SlideMedia | null;
     isContentPlaying: boolean;
+    // Fade-in state after news slides (0.3s transition)
+    isPostNewsFadeIn: boolean;
+    // True while playing the musical video after a news slide (before resuming the original)
+    isPostNewsMusical: boolean;
 
     // Refs equivalents
     playbackState: PlaybackSource;
@@ -63,6 +67,7 @@ interface PlayerState {
     fetchRandomDbVideo: (excludeId?: string, excludeCategory?: string) => Promise<SlideMedia | null>;
     preloadNextVideo: (currentId: string) => Promise<void>;
     finishIntro: () => void;
+    fetchRandomMusicalVideo: () => Promise<SlideMedia | null>;
     activeContentId: string | null;
     setActiveContentId: (id: string | null) => void;
 }
@@ -82,6 +87,8 @@ export const usePlayerStore = create<PlayerState>()(
             isPreRollOverlayActive: false,
             overlayIntroVideo: null,
             isContentPlaying: false,
+            isPostNewsFadeIn: false,
+            isPostNewsMusical: false,
 
             playbackState: 'DB_RANDOM',
             savedProgress: 0,
@@ -119,6 +126,15 @@ export const usePlayerStore = create<PlayerState>()(
                     return await getNewRandomVideo(excludeId, excludeCategory);
                 } catch (error) {
                     console.error("Error fetching DB video:", error);
+                    return null;
+                }
+            },
+
+            fetchRandomMusicalVideo: async () => {
+                try {
+                    return await getRandomMusicalVideo();
+                } catch (error) {
+                    console.error("Error fetching musical video:", error);
                     return null;
                 }
             },
@@ -244,6 +260,27 @@ export const usePlayerStore = create<PlayerState>()(
                 const restoredVolume = savedVolume > 0 ? savedVolume : 0.7;
                 set({ historyVolume: restoredVolume });
 
+                // Post-news musical phase: resume the original paused video
+                if (get().isPostNewsMusical && get().savedVideo) {
+                    const sv = get().savedVideo;
+                    const sp = get().savedProgress;
+                    set({
+                        currentVideo: { ...sv, startAt: sp } as any,
+                        savedVideo: null,
+                        savedProgress: 0,
+                        isPlaying: true,
+                        isContentPlaying: true,
+                        isPreRollOverlayActive: false,
+                        overlayIntroVideo: null,
+                        isPostNewsFadeIn: false,
+                        isPostNewsMusical: false,
+                        activeContentId: sv?.id ?? null
+                    });
+                    if (setVolume) setVolume(restoredVolume);
+                    if (unmute) unmute();
+                    return;
+                }
+
                 const { currentVideo } = get();
                 const intro = get().getRandomIntro();
 
@@ -282,18 +319,18 @@ export const usePlayerStore = create<PlayerState>()(
             },
 
             resumeAfterSlide: () => {
-                const { savedVideo, savedProgress, getRandomIntro } = get();
+                const { savedVideo, getRandomIntro } = get();
+                // Post-news flow: save savedVideo for after the musical clip
                 if (savedVideo) {
                     const intro = getRandomIntro();
-                    const videoWithStart = { ...savedVideo, startAt: savedProgress };
-
                     set({
-                        currentVideo: videoWithStart as any,
+                        // Keep savedVideo intact; we'll restore it AFTER the musical ends
                         isPlaying: true,
                         overlayIntroVideo: intro,
                         isPreRollOverlayActive: true,
                         isContentPlaying: false,
-                        savedVideo: null // Limpiar después de usar
+                        isPostNewsFadeIn: true,       // video fade-in will start on next content
+                        isPostNewsMusical: true        // signal that we're in the musical interlude phase
                     });
                 } else {
                     get().playRandomSequence();
@@ -319,12 +356,30 @@ export const usePlayerStore = create<PlayerState>()(
                 get().handleOnEnded();
             },
 
-            finishIntro: () => {
-                set({
-                    isPreRollOverlayActive: false,
-                    overlayIntroVideo: null,
-                    isContentPlaying: true
-                });
+            finishIntro: async () => {
+                const { isPostNewsMusical, savedVideo } = get();
+
+                if (isPostNewsMusical && savedVideo) {
+                    // Post-news flow: load a random musical video from "clips" category with fade-in
+                    const musical = await get().fetchRandomMusicalVideo();
+                    set({
+                        currentVideo: musical,
+                        isPreRollOverlayActive: false,
+                        overlayIntroVideo: null,
+                        isContentPlaying: true,
+                        isPlaying: true,
+                        isPostNewsFadeIn: true,  // trigger 0.3s video fade-in
+                        isPostNewsMusical: !!musical  // keep flag while musical plays; cleared in handleOnEnded
+                    });
+                } else {
+                    // Normal flow
+                    set({
+                        isPreRollOverlayActive: false,
+                        overlayIntroVideo: null,
+                        isContentPlaying: true,
+                        isPostNewsFadeIn: false
+                    });
+                }
             }
         }),
         { name: 'PlayerStore' }

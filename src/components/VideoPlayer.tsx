@@ -20,6 +20,7 @@ interface VideoPlayerProps {
   playerVolume?: number;
   volumen_extra?: number;
   muted?: boolean; // New prop to force mute locally
+  isFadeIn?: boolean;
 }
 
 export default function VideoPlayer({
@@ -33,7 +34,8 @@ export default function VideoPlayer({
   volumen_extra = 1,
   audioUrl,
   muted: forceMuted, // Alias to avoid conflict with global isMuted
-  id
+  id,
+  isFadeIn = false
 }: VideoPlayerProps) {
   const { activeContentId } = usePlayerStore();
   const [isMounted, setIsMounted] = useState(false);
@@ -178,6 +180,31 @@ export default function VideoPlayer({
       setLocalVolume(clampedVolume);
     }
   }, [effectiveVolume, localVolume, isFadingOut, isPresent]);
+
+  // Post-news slide fade-in (0.3s): sube audio y video gradualmente desde el slide
+  useEffect(() => {
+    if (isFadeIn && isPresent && playerRef.current && localVolume === 0) {
+      // Comienza el fade-in: arranca silenciado y sube en 300ms
+      const targetVolume = Math.max(0, Math.min(1, effectiveVolume));
+      const fadeSteps = 10;
+      const increment = targetVolume / fadeSteps;
+      let currentVol = 0;
+      let step = 0;
+
+      isFadingIn.current = true;
+      if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
+      fadeIntervalRef.current = setInterval(() => {
+        step++;
+        currentVol = Math.min(targetVolume, currentVol + increment);
+        setLocalVolume(currentVol);
+        if (step >= fadeSteps || currentVol >= targetVolume) {
+          if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
+          isFadingIn.current = false;
+          setLocalVolume(targetVolume);
+        }
+      }, 30); // 300ms total (10 pasos de 30ms)
+    }
+  }, [isFadeIn, isPresent, effectiveVolume, localVolume]);
 
   // Sync Fade Out when and component is leaving (AnimatePresence exit)
   useEffect(() => {

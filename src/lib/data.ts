@@ -255,6 +255,31 @@ export async function getNewRandomVideo(currentId?: string, currentCategory?: st
   }
 }
 
+/**
+ * Obtiene un video musical aleatorio de la categoría "clips" (Saladillo Vivo).
+ * Se usa tras el intro post-news para reproducir contenido musical local.
+ */
+export async function getRandomMusicalVideo(excludeId?: string): Promise<Video | null> {
+  try {
+    let query = supabase
+      .from('videos')
+      .select('id, nombre, url, createdAt, categoria, imagen, novedad, forzar_video, volumen_extra')
+      .eq('categoria', 'clips');
+
+    if (excludeId) {
+      query = query.neq('id', excludeId);
+    }
+
+    const { data, error } = await query.limit(50);
+    if (error || !data || data.length === 0) return null;
+
+    return data[Math.floor(Math.random() * data.length)];
+  } catch (error) {
+    console.error('Error in getRandomMusicalVideo:', error);
+    return null;
+  }
+}
+
 export async function getTickerTexts(): Promise<string[]> {
   const { supabaseUrl, supabaseAnonKey } = checkSupabaseCredentials();
   const apiUrl = `${supabaseUrl}/rest/v1/textos_ticker?select=text,isActive&isActive=eq.true&order=createdAt.asc`;
