@@ -175,7 +175,10 @@ Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumpl
      * Arranque: entrá con el dato más fuerte, una imagen visual o el impacto directo al vecino. No amontones todos los datos de golpe.
      * Desarrollo: contá el por qué o el cómo afecta esto a la comunidad, con intensidad constante.
      * Cierre: terminá con una frase conclusiva ("Ahora, restará esperar...", "El próximo paso será...", "De esta manera..."). PROHIBIDO terminar con un dato suelto.
-   - SINTAXIS HABLADA: Oraciones cortas de 15 a 20 palabras. Sujeto + Verbo (voz activa obligatoria) + Complemento. Una idea por oración. Prohibidos los incisos largos, los paréntesis, las comillas y el punto y coma.
+   - SINTAXIS HABLADA Y RESPIRACIÓN: Oraciones cortas de 15 a 20 palabras máximo. Sujeto + Verbo (voz activa obligatoria) + Complemento. Una idea por oración. Prohibidos los incisos largos, los paréntesis, las comillas y el punto y coma.
+   - PUNTUACIÓN RESPIRATORIA OBLIGATORIA: usá comas estrictamente donde un locutor real tomaría una pausa breve para respirar o marcar un inciso, y puntos seguidos para separar ideas completas y forzar una pausa más marcada. Si una frase supera las 20 palabras, dividila con conectores o puntos. Nunca armes oraciones largas o enredadas.
+   - SIGLAS SIEMPRE DESGLOSADAS: ninguna sigla sin desglosar salvo que se lea de corrido. Escribí la sigla con puntos o espacios entre letras (por ejemplo "A. T. A." o "A T A") si el sintetizador tiende a deletrearla mal.
+   - SOLO TEXTO PLANO: el cuerpo debe quedar como texto plano listo para ser leído por la voz. Prohibidos asteriscos, markdown, negritas, notas al pie o cualquier marcador. No incluyas comillas tipográficas ni caracteres especiales que rompan la lectura del sintetizador.
    - ADAPTACIÓN AUDITIVA DE CIFRAS: Redondeá los números extensos para el oído ("casi medio millón" en vez de "478.610"; "casi un millón y medio de pesos" en vez de "1.428.390 pesos"). Traducí medidas a referencias locales asimilables al escuchar ("una superficie como la plaza principal", "como cuatro canchas de fútbol").
    - CERO REPETICIÓN: Cada frase debe sumar un dato nuevo. No repitas palabras ni ideas entre el inicio y el cierre.
    - ESTILO: Como se habla en la radio bonaerense/rioplatense: cercano, natural, empático y con rigor periodístico. Cuidá la correcta acentuación (llegó, anunció, inauguró, continuará).
@@ -186,6 +189,8 @@ Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumpl
      * Comas , para pausas breves y naturales.
      * Puntos seguidos . para bajar el tono y separar ideas.
      * Puntos suspensivos ... para generar expectativa o transición suave (por ejemplo entre el título y el desarrollo).
+   - GUÍA DE LA S ASPIRADA (BONAERENSE): estructurá las frases para que la "s" en posición final o ante consonante se suavice de forma natural. Evitá aglomerar muchas consonantes cerradas seguidas que fuercen una "s" sibilante o marcada. Preferí un ritmo fluido, llano y relajado, típico del interior bonaerense, reacomodando el orden de las palabras si hace falta para que fluyan suaves.
+   - SIGNOS DE ENTONACIÓN SÓLO CON ÉNFASIS GENUINO: usá exclamación e interrogación únicamente cuando el tono periodístico requiera un énfasis emocional real. Evitá sobreactuar: en una locución neutra de noticias, la exclamación debe ser la excepción, no la regla.
    - NÚMEROS EN LETRAS: Escribí los números enteros en letras ("mil novecientos noventa" en lugar de "1990") para evitar lecturas erróneas del TTS.
 
 5. ANÁLISIS DE TONO (campo tono) — asigná UNA etiqueta según el carácter de la noticia:
