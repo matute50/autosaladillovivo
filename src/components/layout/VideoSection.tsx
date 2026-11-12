@@ -189,6 +189,7 @@ const VideoSection: React.FC = () => {
   const [playBackgroundEarly, setPlayBackgroundEarly] = useState(false);
   const transitionTriggeredRef = useRef(false);
   const introWatchdogRef = useRef<NodeJS.Timeout | null>(null);
+  const slideCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     setPlayBackgroundEarly(false);
@@ -214,56 +215,11 @@ const VideoSection: React.FC = () => {
     }
   }, [isSlidePlaying, isHtmlSlideActive, currentSlide]);
 
-  // 1. Gestión de duración y limpieza del slide
+  // Audio Sync - Sincroniza el audio centralizado cuando termina la intro de noticias
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isHtmlSlideActive && currentSlide) {
-      pauseForSlide();
-      hasStartedAudioRef.current = false;
+    if (isNewsIntroActive || isPreRollOverlayActive) return;
 
-      // Regla del slide: NO tiene duración máxima propia. Cada slide dura lo que
-      // dura su locución (audio) MÁS 1 segundo de cola para el fade hacia la
-      // presentación de videos YouTube. La lectura del texto SIEMPRE suena
-      // completa (incluida la frase promocional final).
-      //
-      // El audio es la fuente de verdad: el slide se cierra cuando el audio
-      // termina (onEnded) o, como respaldo de seguridad, al vencer
-      // audio + 1s. NUNCA se corta antes de conocer la duración real del audio
-      // (evita el recorte a un máximo arbitrario que dejaba la locución a medias).
-      const slideDur = (typeof currentSlide === 'object' && currentSlide?.duration) ? Number(currentSlide.duration) : 0;
-      const hasKnownAudio = !!(audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0);
-
-      if (hasKnownAudio) {
-        // Con audio: duración = audio real + 1s de cola para el fade de salida.
-        timer = setTimeout(() => {
-          stopSlide();
-          resumeAfterSlide();
-        }, (audioDurationSec! + 1) * 1000);
-      } else if (slideDur > 0) {
-        // Sin audio conocido pero con duración configurada del slide.
-        timer = setTimeout(() => {
-          stopSlide();
-          resumeAfterSlide();
-        }, slideDur * 1000);
-      }
-      // Sin audio conocido NI duración configurada: NO se programa corte.
-      // El slide se cierra solo cuando el audio termina (onEnded) o apenas
-      // onLoadedMetadata revele la duración real (dispara re-ejecución aquí).
-
-      return () => {
-        if (timer) clearTimeout(timer);
-      };
-    }
-  }, [isHtmlSlideActive, currentSlide?.url, audioDurationSec, stopSlide, resumeAfterSlide, pauseForSlide]);
-
-  // 2. Sincronización de Audio Centralizada (Inicia exactamente al terminar la presentación/intro de noticias)
-  useEffect(() => {
-    // Si la intro de noticias o overlay está activo, esperar a que termine
-    if (isNewsIntroActive || isPreRollOverlayActive) {
-      return;
-    }
-
-    const audioUrl = (isNewsSlide && (currentSlide?.audioUrl || currentVideo?.audioSourceUrl)) || currentVideo?.audioSourceUrl;
+    const audioUrl = isNewsSlide ? (currentSlide?.audioUrl || null) : (currentVideo?.audioSourceUrl || null);
 
     if (audioUrl && audioUrl !== 'NO_AUDIO_URL') {
       if (audioRef.current) {
@@ -290,8 +246,8 @@ const VideoSection: React.FC = () => {
   useEffect(() => {
     hasStartedAudioRef.current = false;
     setAudioDurationSec(null);
+    if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
   }, [currentSlide?.url]);
-
 
 
 
@@ -651,6 +607,15 @@ const VideoSection: React.FC = () => {
                 const el = e.currentTarget;
                 if (el.duration && isFinite(el.duration) && el.duration > 0) {
                   setAudioDurationSec(el.duration);
+                  // Programa cierre del slide al terminar audio + 1s de cola.
+                  // Esto reemplaza el efecto anterior que causaba race condition.
+                  // OnEnded es la vía primaria; este timeout es respaldo por si el
+                  // evento no dispara (por ej. cortada de red, CORS parcial).
+                  if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
+                  slideCloseTimerRef.current = setTimeout(() => {
+                    stopSlide();
+                    resumeAfterSlide();
+                  }, (el.duration + 1) * 1000);
                   try {
                     const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
                     if (iframe && iframe.contentWindow) {
@@ -674,11 +639,20 @@ const VideoSection: React.FC = () => {
               }}
               onEnded={() => {
                 if (isHtmlSlideActive || isNewsSlide || isNewsImageAudio) {
+                  // Cancelar cualquier timer pendiente; onEnded es la fuente de verdad.
+                  if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
                   stopSlide();
                   resumeAfterSlide();
                 }
               }}
-              onError={(e) => console.error("Error reproduciendo audio:", e)}
+              onError={(e) => {
+                console.error("[VideoSection] Error reproduciendo audio noticia:", e);
+                // Si hay error de carga (CORS, red, archivo truncado), cerramos el slide
+                // para no dejarlo colgado indefinidamente sin audio.
+                if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
+                stopSlide();
+                resumeAfterSlide();
+              }}
             />
 
             {/* === PERSISTENT INTRO OVERLAY === */}

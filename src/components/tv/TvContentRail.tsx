@@ -123,12 +123,13 @@ const TvContentRail: React.FC<TvContentRailProps> = ({ searchResults, isSearchin
 
       if (isHtmlSlide) {
         // pauseForSlide() en VideoSection.tsx gestiona la pausa automáticamente (P4-fix)
-        const slideToPlay = { 
-          url: urlSlide, 
-          type: 'html' as const, 
-          duration, 
-          audioUrl: audioUrl || null, // Forzar a null si es falsy para evitar undefined
-          title 
+        const slideToPlay = {
+          url: urlSlide,
+          type: 'html' as const,
+          duration,
+          audioUrl: audioUrl || null,
+          title,
+          embedsAudio: false  // El audio es centralizado por VideoSection; el iframe NO maneja <audio>
         };
         console.log('[TvRail-Click] Ejecutando playSlide con:', slideToPlay);
         playSlide(slideToPlay);
