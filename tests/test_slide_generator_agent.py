@@ -192,6 +192,34 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertIn("var pauseMs = 2000;", html)
         self.assertIn("kbSingleStyle", html)
 
+    def test_timed_subtitles_correct_desfase(self):
+        """Los timestamps deben escalar proporcionalmente para igualar body_dur real,
+        y la promo debe empezar exactamente 1s después del body escalado."""
+        from agents.slide_generator_agent import SlideGeneratorAgent
+        agent = SlideGeneratorAgent()
+        # Texto con 30 palabras, duración total simulada 17.73s
+        lines = agent.generate_timed_subtitles(
+            text="La Municipalidad anunció hoy la renovación integral de la plaza central con juegos inclusivos y nueva iluminación LED, además del inicio de las obras de pavimentación en varias calles del centro urbano.",
+            total_duration=17.73,
+            promo_phrase="Innovamos para que solo escuches. Solo en Saladillo Vivo."
+        )
+        # Debe haber líneas de cuerpo + 1 de promo
+        body_lines = [l for l in lines if not l.get('is_promo')]
+        promo_lines = [l for l in lines if l.get('is_promo')]
+        self.assertGreater(len(body_lines), 0, "Debe haber al menos una línea de cuerpo")
+        self.assertEqual(len(promo_lines), 1, "Debe haber exactamente una línea de promo")
+
+        # El body debe terminar exactamente antes de la promo (+1s de pausa)
+        last_body_end = body_lines[-1]["end"]
+        promo_start = promo_lines[0]["start"]
+        promo_end = promo_lines[0]["end"]
+        # Promo debe empezar ~1s después del body
+        self.assertAlmostEqual(promo_start - last_body_end, 1.0, delta=0.02,
+            msg=f"La promo debe iniciar 1s después del body: body_end={last_body_end}, promo_start={promo_start}")
+        # Promo debe terminar exactamente en total_duration
+        self.assertAlmostEqual(promo_end, 17.73, delta=0.02,
+            msg=f"La promo debe terminar en total_duration=17.73, terminó en {promo_end}")
+
 
 if __name__ == "__main__":
     unittest.main()

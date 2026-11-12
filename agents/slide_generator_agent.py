@@ -757,6 +757,12 @@ class SlideGeneratorAgent:
         adaptadas al ancho de pantalla (16:9 broadcast).
         Alinea la lectura del cuerpo de la noticia y garantiza que la frase de promoción
         inicie EXACTAMENTE un segundo después del final de la lectura del cuerpo.
+
+        CORRECCIÓN DE DESFASE: Los timestamps se calculan con pesos estimados de palabras,
+        pero la duración real del TTS varía. Para evitar desfase audio-karaoke, se aplica
+        un factor de corrección proporcional que iguala el final del body con la duración
+        real disponible, y se recalcula la promo para que ocupe exactamente el tiempo
+        restante (total_duration - body_end - 1s de pausa).
         """
         clean_text = re.sub(r'\s+', ' ', text.strip()) if text else ""
         words = clean_text.split()
@@ -768,14 +774,14 @@ class SlideGeneratorAgent:
         has_promo = total_duration >= 5.0
         if has_promo:
             promo_words = promo_phrase.split()
-            promo_dur = max(2.5, min(4.0, len(promo_words) * 0.45))
-            pause_dur = 1.0  # Exactamente 1 segundo de pausa tras el cuerpo
-            body_dur = max(4.0, total_duration - pause_dur - promo_dur)
+            promo_dur_est = max(2.5, min(4.0, len(promo_words) * 0.45))
+            pause_dur = 1.0
+            body_dur = max(4.0, total_duration - pause_dur - promo_dur_est)
         else:
-            body_dur = total_duration
             promo_words = []
-            promo_dur = 0.0
+            promo_dur_est = 0.0
             pause_dur = 0.0
+            body_dur = total_duration
 
         weights = []
         for w in words:
@@ -840,9 +846,25 @@ class SlideGeneratorAgent:
                 "is_promo": False
             })
 
-        # Línea de la frase de promoción: inicia exactamente 1 segundo después del final del cuerpo
+        # === CORRECCIÓN DE DESFASE PROPORCIONAL ===
+        # Si el body estimado termina antes o después de body_dur, escalar todos los
+        # timestamps para que el último coincida exactamente con body_dur. Esto corrige
+        # el desfase causado por variaciones naturales de velocidad del TTS.
+        last_body_end = formatted_lines[-1]["end"] if formatted_lines else speech_start
+        if last_body_end > speech_start and abs(last_body_end - body_dur) > 0.05:
+            scale = body_dur / last_body_end
+            for line in formatted_lines:
+                line["start"] = round(line["start"] * scale, 2)
+                line["end"] = round(line["end"] * scale, 2)
+                for word in line["words"]:
+                    word["s"] = round(word["s"] * scale, 2)
+                    word["e"] = round(word["e"] * scale, 2)
+
+        # Línea de la frase de promoción: inicia exactamente 1 segundo después
+        # del FINAL DEL CUERPO (ya escalado), termina exactamente en total_duration.
         if has_promo and promo_words:
-            promo_start = round(body_dur + 1.0, 2)
+            actual_body_end = formatted_lines[-1]["end"] if formatted_lines else body_dur
+            promo_start = round(actual_body_end + pause_dur, 2)
             promo_end = round(total_duration, 2)
             p_avail = max(1.0, promo_end - promo_start)
             p_timed = []
