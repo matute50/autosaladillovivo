@@ -220,6 +220,23 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         self.assertAlmostEqual(promo_end, 17.73, delta=0.02,
             msg=f"La promo debe terminar en total_duration=17.73, terminó en {promo_end}")
 
+    def test_estimate_audio_duration_formula_and_clamp(self):
+        """La estimación de duración usa la fórmula de palabras/2.08 + buffer, clampada 4-120s."""
+        agent = SlideGeneratorAgent()
+        # Texto de 20 palabras -> (20/2.08) + 1 + 3 = 9.62 + 4 = 13.62 -> round = 13.6
+        self.assertAlmostEqual(agent.estimate_audio_duration(" ".join(["palabra"] * 20)), 13.6, places=1)
+        # Texto vacío -> duración mínima 4.0
+        self.assertEqual(agent.estimate_audio_duration(""), 4.0)
+        # Texto muy largo -> clamp a 120.0
+        long_text = " ".join(["palabra"] * 500)
+        self.assertLessEqual(agent.estimate_audio_duration(long_text), 120.0)
+
+    def test_retry_constants_defined(self):
+        """Las constantes de retry/backoff para uploads deben estar definidas en la clase."""
+        agent = SlideGeneratorAgent()
+        self.assertGreaterEqual(agent.MAX_UPLOAD_RETRIES, 1)
+        self.assertGreater(agent.UPLOAD_BACKOFF_BASE, 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

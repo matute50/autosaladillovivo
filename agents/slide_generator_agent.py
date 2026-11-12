@@ -89,6 +89,20 @@ class SlideGeneratorAgent:
     MAX_UPLOAD_RETRIES: int = 3
     UPLOAD_BACKOFF_BASE: float = 2.0
 
+    # Fórmula de estimación de duración de audio (fallback)
+    WPS_SPEECH_RATE: float = 2.08   # palabras por segundo (voz rioplatense TTS)
+    INITIAL_PAUSE: float = 1.0      # pausa inicial antes de empezar a leer
+    CLOSING_BUFFER: float = 3.0     # buffer de cierre/promo
+    MIN_EST_DURATION: float = 4.0
+    MAX_EST_DURATION: float = 120.0
+
+    # Umbral y parámetros de la frase institucional de cierre (promo)
+    PROMO_THRESHOLD: float = 5.0    # duración mínima total para incluir promo
+    PROMO_PAUSE: float = 1.0        # pausa de 1s entre cuerpo y promo
+    PROMO_MIN_DUR: float = 2.5      # duración mínima estimada de la promo
+    PROMO_MAX_DUR: float = 4.0      # duración máxima estimada de la promo
+    PROMO_WPS: float = 0.45         # palabras por segundo para la promo
+
     def estimate_audio_duration(self, text: str) -> float:
         """
         Calcula una estimación PROVISIONAL de la duración del audio en segundos.
@@ -97,8 +111,8 @@ class SlideGeneratorAgent:
         explícita a create_slide_html().
         """
         words = len(text.strip().split()) if text else 0
-        duration = (words / 2.08) + 1.0 + 3.0
-        return max(4.0, min(round(duration, 1), 120.0))
+        duration = (words / self.WPS_SPEECH_RATE) + self.INITIAL_PAUSE + self.CLOSING_BUFFER
+        return max(self.MIN_EST_DURATION, min(round(duration, 1), self.MAX_EST_DURATION))
 
     def generate_default_visuals(self, title: str, text: str) -> Dict:
         """
@@ -799,11 +813,11 @@ class SlideGeneratorAgent:
 
         # Siempre incluir frase promocional institucional tras pausa de 1s
         # (siempre que la duración permita un cierre viable de >= 2.5s)
-        has_promo = total_duration >= 5.0
+        has_promo = total_duration >= self.PROMO_THRESHOLD
         if has_promo:
             promo_words = promo_phrase.split()
-            promo_dur_est = max(2.5, min(4.0, len(promo_words) * 0.45))
-            pause_dur = 1.0
+            promo_dur_est = max(self.PROMO_MIN_DUR, min(self.PROMO_MAX_DUR, len(promo_words) * self.PROMO_WPS))
+            pause_dur = self.PROMO_PAUSE
             body_dur = max(4.0, total_duration - pause_dur - promo_dur_est)
         else:
             promo_words = []
