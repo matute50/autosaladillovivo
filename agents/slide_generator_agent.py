@@ -945,10 +945,11 @@ class SlideGeneratorAgent:
         :root {
             --slide-audio-duration: {{ (audio_duration | round(1)) if audio_duration else 36 }}s;
             --slide-photo-duration: {{ (photo_duration | round(1)) if photo_duration else 15 }}s;
-            --color-primary: #003399;
-            --color-primary-light: #0055ff;
-            --color-accent-sky: #38bdf8;
-            --color-speaking-gold: #facc15;
+            /* Paleta Saladillo Vivo: azul, celeste, rojo, blanco */
+            --sv-blue:  #003399;
+            --sv-sky:   #38bdf8;
+            --sv-red:   #ef4444;
+            --sv-white: #ffffff;
             /* Factor de velocidad del efecto Ken Burns: 0.7 = ciclo suave por foto */
             --kb-speed: 0.7;
         }
@@ -1071,54 +1072,6 @@ class SlideGeneratorAgent:
             z-index: 10;
         }
 
-        /* Branding minimalista superior */
-        .top-brand-badge {
-            position: absolute;
-            top: 4.5%;
-            left: 4.5%;
-            z-index: 25;
-            display: inline-flex;
-            align-items: center;
-            gap: 9px;
-            background: rgba(6, 12, 28, 0.72);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            padding: 6px 14px;
-            border-radius: 9999px;
-            color: #ffffff;
-            font-size: clamp(0.68rem, 1.2vw, 0.82rem);
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
-            pointer-events: none;
-        }
-
-        .live-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background-color: #ef4444;
-            box-shadow: 0 0 8px #ef4444;
-            animation: pulseDot 2s infinite ease-in-out;
-        }
-
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.35; transform: scale(0.85); }
-        }
-
-        .brand-sep {
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 0.85em;
-        }
-
-        .kicker-text {
-            color: var(--color-accent-sky);
-            font-weight: 800;
-        }
-
         /* ==========================================================================
            SUBTITULADO EN UNA SOLA LÍNEA AL RITMO DEL AUDIO (Karaoke Broadcast)
            ========================================================================== */
@@ -1161,10 +1114,10 @@ class SlideGeneratorAgent:
 
         /* Palabra activa en el instante de locución */
         .word-token.active-speaking {
-            color: var(--color-speaking-gold) !important; /* Amarillo oro TV */
+            color: var(--sv-red) !important;
             font-weight: 900 !important;
             transform: scale(1.09) translateY(-1px);
-            text-shadow: 0 0 16px rgba(250, 204, 21, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
+            text-shadow: 0 0 16px rgba(239, 68, 68, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
         }
 
         /* Palabra ya pronunciada */
@@ -1175,20 +1128,20 @@ class SlideGeneratorAgent:
             text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
         }
 
-        /* LÍNEA INSTITUCIONAL DE PROMO — estilo dorado broadcast */
+        /* LÍNEA INSTITUCIONAL DE PROMO — estilo rojo broadcast */
         .subtitle-single-line.is-promo-line .word-token.active-speaking {
-            color: var(--color-speaking-gold) !important;
+            color: var(--sv-blue) !important;
             font-weight: 900 !important;
             transform: scale(1.09) translateY(-1px);
-            text-shadow: 0 0 16px rgba(250, 204, 21, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
+            text-shadow: 0 0 16px rgba(0, 51, 153, 0.9), 0 2px 10px rgba(0, 0, 0, 1) !important;
         }
         .subtitle-single-line.is-promo-line .word-token.spoken {
-            color: rgba(250, 204, 21, 0.75) !important;
+            color: rgba(0, 51, 153, 0.75) !important;
             font-weight: 700;
             opacity: 0.9;
         }
         .subtitle-single-line.is-promo-line .word-token {
-            color: rgba(250, 204, 21, 0.35);
+            color: rgba(0, 51, 153, 0.35);
         }
 
         /* Barra de progreso global sutil */
@@ -1206,8 +1159,8 @@ class SlideGeneratorAgent:
         .progress-line-fill {
             width: 0%;
             height: 100%;
-            background: linear-gradient(90deg, #0055ff, #38bdf8, #facc15);
-            box-shadow: 0 0 8px rgba(250, 204, 21, 0.6);
+            background: linear-gradient(90deg, #003399, #38bdf8, #ef4444);
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
             transition: width 0.1s linear;
         }
     </style>
@@ -1226,16 +1179,6 @@ class SlideGeneratorAgent:
 
     <!-- GRADIENTE CINEMÁTICO INFERIOR -->
     <div class="bottom-gradient-scrim"></div>
-
-    <!-- BRANDING DISCRETO SUPERIOR -->
-    <div class="top-brand-badge">
-        <span class="live-dot"></span>
-        <span class="brand-text">SALADILLO VIVO</span>
-        {% if visuals.kicker %}
-        <span class="brand-sep">&bull;</span>
-        <span class="kicker-text">{{ visuals.kicker }}</span>
-        {% endif %}
-    </div>
 
     <!-- SUBTITULADO DEL TEXTO EN UNA SOLA LÍNEA AL RITMO DEL AUDIO -->
     <div class="subtitle-stage" id="subtitleStage">
