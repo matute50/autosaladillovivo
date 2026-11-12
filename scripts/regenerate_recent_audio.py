@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-Regenera audio + slide de las últimas noticias publicadas.
+Regenera audio + slide de las últimas noticias publicadas con todos los fixes.
 
 Motivos:
   1. Los audios viejos se armaron con DOS sintesis (cuerpo por un motor, promo
      por otro) -> se escuchaba una voz distinta en la frase promocional.
   2. Esos registros no tienen animation_duration -> el reproductor cerraba el
      slide antes de terminar la locución.
+  3. La galería completa (images_urls) no se propagaba al slide -> se perdían
+     fotos y el Ken Burns quedaba sin material visual.
 
-Con el código actual (síntesis continua + splice de 1 s exacto + duración real)
-cada nota queda con una sola voz de principio a fin y su duración exacta en DB.
+Con el código actual (síntesis continua + splice de 1 s exacto + duración real
++ galería completa + animation_duration = audio + 1s de cola) cada nota queda
+con una sola voz de principio a fin, lee el texto COMPLETO (sin re-condensar),
+muestra todas sus fotos y el slide dura exactamente lo que dura su audio + 1s.
 """
 import os
 import sys
@@ -39,7 +43,7 @@ def main():
     resp = requests.get(
         storage.base_rest_url,
         params={
-            "select": "id,title,text,meta_description,image_url,audio_url,url_slide,created_at",
+            "select": "id,title,text,meta_description,image_url,images_urls,audio_url,url_slide,created_at",
             "is_published": "eq.true",
             "created_at": f"gte.{cutoff}",
             "order": "created_at.desc",
@@ -52,20 +56,15 @@ def main():
     rows = resp.json() or []
     print(f"🔄 Artículos a regenerar: {len(rows)} (últimos {DAYS} días)")
 
-    from agents.ai_rewriter_agent import AiRewriterAgent
-    rewriter = AiRewriterAgent()
-
     ok = 0
     for i, row in enumerate(rows, 1):
         art_id = row["id"]
         title = row.get("title") or ""
-        raw_text = row.get("text") or ""
-        if not raw_text:
+        # Lectura COMPLETA: el texto en DB ya pasó por el rewriter; NO se re-condensa.
+        text = row.get("text") or ""
+        if not text:
             print(f"  [{i}/{len(rows)}] id={art_id} sin texto, omito")
             continue
-
-        # Asegurar que el cuerpo de la noticia concluya oraciones completas antes de locutar
-        text = rewriter._condense_body_cleanly(raw_text, target_words=105)
 
         print(f"  [{i}/{len(rows)}] id={art_id} «{title[:48]}…»")
         audio_url = audio.process_article_audio(
@@ -83,23 +82,25 @@ def main():
 
         slide_url = None
         try:
-            image_urls = [row["image_url"]] if row.get("image_url") else []
+            # Galería COMPLETA si existe; fallback a la imagen principal.
+            images_urls = list(row.get("images_urls") or [])
+            if not images_urls and row.get("image_url"):
+                images_urls = [row["image_url"]]
             slide_url = slide.process_article_slide(
                 article_id=art_id,
                 title=title,
                 text=text,
                 audio_url=audio_url,
-                image_urls=image_urls,
+                image_urls=images_urls,
                 audio_duration=dur,
             )
         except Exception as e:
             print(f"    ⚠️ slide falló: {type(e).__name__}: {e}")
 
         patch = {"audio_url": audio_url}
-        if text != raw_text:
-            patch["text"] = text
         if dur:
-            patch["animation_duration"] = dur
+            # El slide dura lo que dura el audio + 1s de cola para el fade.
+            patch["animation_duration"] = round(dur + 1, 1)
         if slide_url:
             patch["url_slide"] = slide_url
 
