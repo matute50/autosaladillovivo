@@ -398,10 +398,20 @@ const VideoSection: React.FC = () => {
     }
   }, [currentVideo, isLocalIntro]);
 
+  // Fullscreen con prefijos cross-browser (Safari / Chrome / Firefox)
   const toggleFullScreen = () => {
     if (!playerContainerRef.current) return;
-    if (!document.fullscreenElement) (document.documentElement as any).requestFullscreen();
-    else document.exitFullscreen?.();
+    const el = document.documentElement as any;
+    const doc = document as any;
+    if (!doc.fullscreenElement && !el.webkitRequestFullscreen) {
+      if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      else if (el.mozRequestFullScreen) el.mozRequestFullScreen();
+      else el.requestFullscreen?.();
+    } else {
+      if (doc.webkitIsFullScreen) doc.webkitCancelFullScreen?.();
+      else if (doc.mozCancelFullScreen) doc.mozCancelFullScreen();
+      else doc.exitFullscreen?.();
+    }
   };
 
   useEffect(() => {

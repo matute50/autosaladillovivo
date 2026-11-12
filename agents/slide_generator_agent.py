@@ -7,7 +7,7 @@ con diseño cinematográfico, fotografías optimizadas y locución con acento ri
 Los slides generados son alojados en el bucket público 'slides' de Supabase Storage.
 
 Características:
-- Diseño responsive TV-Grade con logo de Saladillo Vivo, Lower Thirds y controles ARIA.
+- Diseño responsive TV-Grade con logo de Saladillo Vivo, subtitulado en una sola línea al ritmo del audio (karaoke broadcast) y controles ARIA.
 - Locución en acento rioplatense auténtico usando Voxtral TTS (Elena, voz_483) con preprocesador fonético.
 - Optimización y redimensionado de imágenes Full HD con Pillow (Lanczos).
 - Plantilla Jinja2 interactiva con reproducción de audio automática y fallback manual.
@@ -1033,31 +1033,51 @@ class SlideGeneratorAgent:
         /* BANNERS / AFICHES */
         .photo-slide.is-banner .photo-main {
             object-fit: contain !important;
+            -webkit-animation: kenBurnsBanner {% if images and images | length > 1 %}calc(var(--slide-photo-duration, 15s) * var(--kb-speed, 0.7)){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
             animation: kenBurnsBanner {% if images and images | length > 1 %}calc(var(--slide-photo-duration, 15s) * var(--kb-speed, 0.7)){% else %}var(--slide-audio-duration, 36s){% endif %} ease-in-out infinite alternate !important;
         }
 
+        @-webkit-keyframes kenBurnsBanner {
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            50% { -webkit-transform: scale(1.06); transform: scale(1.06); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+        }
         @keyframes kenBurnsBanner {
-            0% { transform: scale(1.0); }
-            50% { transform: scale(1.06); }
-            100% { transform: scale(1.0); }
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            50% { -webkit-transform: scale(1.06); transform: scale(1.06); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
         }
 
+        @-webkit-keyframes kenBurnsZoomIn {
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            100% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+        }
         @keyframes kenBurnsZoomIn {
-            0% { transform: scale(1.0); }
-            100% { transform: scale(1.22); }
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            100% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+        }
+        @-webkit-keyframes kenBurnsZoomOut {
+            0% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
         }
         @keyframes kenBurnsZoomOut {
-            0% { transform: scale(1.22); }
-            100% { transform: scale(1.0); }
+            0% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
         }
 
         /* FOTO ÚNICA: ciclo completo zoom in → pausa 2s → zoom out. Los porcentajes de parada
            se recalculan en JS según la duración real del audio (applySinglePhotoKenBurns). */
+        @-webkit-keyframes kenBurnsSinglePhoto {
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            40% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            55% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+        }
         @keyframes kenBurnsSinglePhoto {
-            0% { transform: scale(1.0); }
-            40% { transform: scale(1.22); }
-            55% { transform: scale(1.22); }
-            100% { transform: scale(1.0); }
+            0% { -webkit-transform: scale(1.0); transform: scale(1.0); }
+            40% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            55% { -webkit-transform: scale(1.22); transform: scale(1.22); }
+            100% { -webkit-transform: scale(1.0); transform: scale(1.0); }
         }
 
         /* Gradiente cinemático inferior para lectura perfecta sin tapar la foto */
@@ -1109,6 +1129,7 @@ class SlideGeneratorAgent:
             color: rgba(255, 255, 255, 0.38); /* Palabras futuras: atenuadas */
             text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95);
             transition: color 0.12s ease, transform 0.12s ease, text-shadow 0.12s ease;
+            -webkit-transition: color 0.12s ease, -webkit-transform 0.12s ease, text-shadow 0.12s ease;
             will-change: color, transform;
         }
 
@@ -1367,8 +1388,10 @@ class SlideGeneratorAgent:
                     var kbName = (idx % 2 === 0) ? 'kenBurnsZoomIn' : 'kenBurnsZoomOut';
                     var kbDur = (photoDurMs / 1000) + 's';
                     mainImg.style.animation = 'none';
+                    mainImg.style.webkitAnimation = 'none';
                     void mainImg.offsetHeight; // forzar reflow para reiniciar la animación
                     mainImg.style.animation = kbName + ' ' + kbDur + ' ease-out forwards';
+                    mainImg.style.webkitAnimation = kbName + ' ' + kbDur + ' ease-out forwards';
                 }
             }
 
@@ -1389,15 +1412,23 @@ class SlideGeneratorAgent:
                     st.id = 'kbSingleStyle';
                     document.head.appendChild(st);
                 }
-                st.textContent = '@keyframes kenBurnsSinglePhoto {'
-                    + '0%{transform:scale(1.0);}'
-                    + pctMove + '%{transform:scale(1.22);}'
-                    + (pctMove + pctPause) + '%{transform:scale(1.22);}'
-                    + '100%{transform:scale(1.0);}'
+                st.textContent = '@-webkit-keyframes kenBurnsSinglePhoto {'
+                    + '0%{-webkit-transform:scale(1.0);transform:scale(1.0);}'
+                    + pctMove + '%{-webkit-transform:scale(1.22);transform:scale(1.22);}'
+                    + (pctMove + pctPause) + '%{-webkit-transform:scale(1.22);transform:scale(1.22);}'
+                    + '100%{-webkit-transform:scale(1.0);transform:scale(1.0);}'
+                    + '}'
+                    + '@keyframes kenBurnsSinglePhoto {'
+                    + '0%{-webkit-transform:scale(1.0);transform:scale(1.0);}'
+                    + pctMove + '%{-webkit-transform:scale(1.22);transform:scale(1.22);}'
+                    + (pctMove + pctPause) + '%{-webkit-transform:scale(1.22);transform:scale(1.22);}'
+                    + '100%{-webkit-transform:scale(1.0);transform:scale(1.0);}'
                     + '}';
                 mainImg.style.animation = 'none';
+                mainImg.style.webkitAnimation = 'none';
                 void mainImg.offsetHeight;
                 mainImg.style.animation = 'kenBurnsSinglePhoto ' + (totalMs / 1000) + 's ease-out forwards';
+                mainImg.style.webkitAnimation = 'kenBurnsSinglePhoto ' + (totalMs / 1000) + 's ease-out forwards';
             }
 
             // Auto-iniciar rotación de fotos: tick persistente de 100ms que recorre el orden
@@ -1569,7 +1600,7 @@ class SlideGeneratorAgent:
         Procesa el ciclo completo para un artículo:
         1. Verificación o generación de audio rioplatense (si falta audio_url)
         2. Optimización y análisis visual de imágenes (Ken Burns + IA focal point)
-        3. Renderizado del template HTML con voz y diseño TV-Grade (Lower Thirds + Placa Central)
+        3. Renderizado del template HTML con voz y diseño TV-Grade (subtitulado en una sola línea, karaoke broadcast)
         4. Generación de nombre único de archivo
         5. Subida al bucket 'slides' de Supabase Storage
         6. Retorna la URL pública del slide

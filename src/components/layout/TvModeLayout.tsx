@@ -100,10 +100,11 @@ const TvModeLayout = () => {
 
   const toggleFullScreen = useCallback(() => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen()
-        .catch((e) => console.error("Fullscreen requiere interacción:", e));
+      const el = document.documentElement as any;
+      (el.webkitRequestFullscreen || el.mozRequestFullScreen || el.requestFullscreen)?.call(el)
+        .catch((e: any) => console.error("Fullscreen requiere interacción:", e));
     } else {
-      document.exitFullscreen().catch(() => { });
+      document.exitFullscreen?.().catch(() => {});
     }
   }, []);
 

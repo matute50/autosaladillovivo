@@ -66,8 +66,8 @@ class SlideGeneratorAgentTests(unittest.TestCase):
         fallback_result = self.agent.process_images_for_slide(999, [])
         self.assertEqual(fallback_result[0]["url"], "/default-og-image.png")
 
-    def test_promo_line_has_dedicated_gold_css(self):
-        """La clase .is-promo-line debe tener reglas CSS doradas definidas."""
+    def test_promo_line_has_dedicated_branding_css(self):
+        """La clase .is-promo-line debe tener reglas CSS con paleta de marca (celeste/azul)."""
         title = "Noticia prueba"
         text = "El intendente anunció obras nuevas en Saladillo."
         audio_url = "https://example.com/audio.mp3"
@@ -82,10 +82,10 @@ class SlideGeneratorAgentTests(unittest.TestCase):
             audio_duration=18.0
         )
 
-        # Debe existir la regla CSS para promo line (palabra activa dorada)
+        # Debe existir la regla CSS para promo line con paleta marca (no gold)
         self.assertIn(".subtitle-single-line.is-promo-line .word-token.active-speaking", html)
-        self.assertIn("color: var(--color-speaking-gold)", html)
-        # Debe existir también el estilo para palabras spoken y futuras en dorado atenuado
+        self.assertIn("color: var(--sv-sky) !important", html)
+        # Spoken y futuras también usan tonos celestes de marca
         self.assertIn(".subtitle-single-line.is-promo-line .word-token.spoken", html)
         self.assertIn(".subtitle-single-line.is-promo-line .word-token", html)
 

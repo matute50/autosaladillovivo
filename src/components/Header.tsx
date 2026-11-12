@@ -139,7 +139,8 @@ const Header = () => {
     if (nextMode === 'tv') {
       // Intentar pantalla completa automáticamente al entrar en modo TV
       if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(err => {
+        const el = document.documentElement as any;
+        (el.webkitRequestFullscreen || el.mozRequestFullScreen || el.requestFullscreen)?.call(el).catch((err: any) => {
           console.warn("Pantalla completa bloqueada (requiere interacción directa):", err);
         });
       }
