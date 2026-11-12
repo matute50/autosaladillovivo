@@ -219,50 +219,39 @@ const VideoSection: React.FC = () => {
     let timer: NodeJS.Timeout;
     if (isHtmlSlideActive && currentSlide) {
       pauseForSlide();
-      hasStartedAudioRef.current = false; 
+      hasStartedAudioRef.current = false;
 
-      // Con audio conocido: la locución debe sonar COMPLETA (hasta el final del
-      // texto de la noticia, incluida la frase promocional final). El slide NO
-      // se corta con fade ni antes de tiempo: se cierra solo cuando el audio
-      // termina (onEnded) o, como respaldo, al vencer la duración real + margen.
-      // Sin audio conocido: se usa la duración configurada del slide.
-      const hasKnownAudio = !!(audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0);
+      // Regla del slide: NO tiene duración máxima propia. Cada slide dura lo que
+      // dura su locución (audio) MÁS 1 segundo de cola para el fade hacia la
+      // presentación de videos YouTube. La lectura del texto SIEMPRE suena
+      // completa (incluida la frase promocional final).
+      //
+      // El audio es la fuente de verdad: el slide se cierra cuando el audio
+      // termina (onEnded) o, como respaldo de seguridad, al vencer
+      // audio + 1s. NUNCA se corta antes de conocer la duración real del audio
+      // (evita el recorte a un máximo arbitrario que dejaba la locución a medias).
       const slideDur = (typeof currentSlide === 'object' && currentSlide?.duration) ? Number(currentSlide.duration) : 0;
-      const effectiveAudioDuration = hasKnownAudio
-        // margen de seguridad: nunca pisa el final de la locución
-        ? Math.max(audioDurationSec! + 3, slideDur)
-        : (slideDur > 5 ? Math.max(slideDur, 35) : 40);
-      const duration = effectiveAudioDuration * 1000;
-      const fadeOutDuration = 1000; // 1 segundo de fade out (solo sin audio: slides animados)
+      const hasKnownAudio = !!(audioDurationSec && isFinite(audioDurationSec) && audioDurationSec > 0);
 
-      // Timer para el fade out — SOLO si no hay audio que proteger.
-      // Con audio, el fade cortaba la última sílaba de la frase promocional
-      // exactamente en la cola de la locución.
-      const fadeOutTimer = hasKnownAudio ? null : setTimeout(() => {
-        if (audioRef.current) {
-          const steps = 20;
-          const intervalTime = fadeOutDuration / steps;
-          let currentStep = 0;
-          const startVolume = audioRef.current.volume;
-
-          const fadeInterval = setInterval(() => {
-            currentStep++;
-            if (audioRef.current) {
-              audioRef.current.volume = Math.max(0, startVolume * (1 - currentStep / steps));
-            }
-            if (currentStep >= steps) clearInterval(fadeInterval);
-          }, intervalTime);
-        }
-      }, Math.max(0, duration - fadeOutDuration));
-
-      timer = setTimeout(() => {
-        stopSlide();
-        resumeAfterSlide();
-      }, duration);
+      if (hasKnownAudio) {
+        // Con audio: duración = audio real + 1s de cola para el fade de salida.
+        timer = setTimeout(() => {
+          stopSlide();
+          resumeAfterSlide();
+        }, (audioDurationSec! + 1) * 1000);
+      } else if (slideDur > 0) {
+        // Sin audio conocido pero con duración configurada del slide.
+        timer = setTimeout(() => {
+          stopSlide();
+          resumeAfterSlide();
+        }, slideDur * 1000);
+      }
+      // Sin audio conocido NI duración configurada: NO se programa corte.
+      // El slide se cierra solo cuando el audio termina (onEnded) o apenas
+      // onLoadedMetadata revele la duración real (dispara re-ejecución aquí).
 
       return () => {
-        clearTimeout(timer);
-        if (fadeOutTimer) clearTimeout(fadeOutTimer);
+        if (timer) clearTimeout(timer);
       };
     }
   }, [isHtmlSlideActive, currentSlide?.url, audioDurationSec, stopSlide, resumeAfterSlide, pauseForSlide]);
