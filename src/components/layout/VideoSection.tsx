@@ -90,7 +90,6 @@ const VideoSection: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const introVideoRef = useRef<HTMLVideoElement>(null);
   const [isIntroFadingOut, setIsIntroFadingOut] = useState(false);
-  const [slideFadeOut, setSlideFadeOut] = useState(false);
   const [slideHtmlContent, setSlideHtmlContent] = useState<string | null>(null);
 
 
@@ -201,7 +200,6 @@ const VideoSection: React.FC = () => {
     transitionSignaledRef.current = false;
     setCurrentDuration(0);
     setIsIntroFadingOut(false);
-    setSlideFadeOut(false);
   }, [currentVideo?.id]);
 
   const hasStartedAudioRef = useRef(false);
@@ -492,7 +490,7 @@ const VideoSection: React.FC = () => {
             {isNewsSlide && (slideHtmlContent || currentSlide?.url || currentVideo?.url_slide || (currentVideo?.url && currentVideo.url.includes('.html'))) && (() => {
               const rawUrl = typeof currentSlide === 'string' ? currentSlide : (currentSlide?.url || currentVideo?.url_slide || currentVideo?.url);
               return (
-                <div key={rawUrl} className={`absolute inset-0 z-40 bg-black transition-opacity duration-500 ${slideFadeOut ? 'opacity-0' : 'opacity-100'}`}>
+                <div key={rawUrl} className="absolute inset-0 z-40 bg-black">
                   <iframe
                     srcDoc={slideHtmlContent || undefined}
                     src={slideHtmlContent ? undefined : rawUrl}
@@ -678,10 +676,6 @@ const VideoSection: React.FC = () => {
               }}
               onTimeUpdate={(e) => {
                 const el = e.currentTarget;
-                // Fade out del slide en los 0.5s finales del audio
-                if ((el.duration - el.currentTime <= 0.5) && !slideFadeOut && el.duration > 0) {
-                  setSlideFadeOut(true);
-                }
                 try {
                   const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
                   if (iframe && iframe.contentWindow) {
