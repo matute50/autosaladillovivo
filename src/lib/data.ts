@@ -89,11 +89,9 @@ export async function getArticlesForHome(limitTotal: number = 25) {
       // Las demás 'featured' se convierten en 'secondary'
       secondaryNews.unshift(...featuredCandidates);
     } else if (processedNews.length > 0) {
-      // Si no hay 'featured', la más reciente de todas es la destacada
-      const oldestNonFeatured = processedNews.find(p => p.id !== featuredNews?.id);
-      if (oldestNonFeatured) {
-        featuredNews = oldestNonFeatured;
-      }
+      // Si no hay 'featured', la última generada (más reciente) es la destacada
+      // processedNews ya viene ordenado por created_at DESC desde Supabase
+      featuredNews = processedNews[0];
     }
 
     secondaryNews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
