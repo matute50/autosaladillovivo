@@ -223,10 +223,6 @@ const VideoSection: React.FC = () => {
 
   // Audio Sync - Sincroniza el audio centralizado cuando termina la intro de noticias
   useEffect(() => {
-    // NO tocar el audio si hay un slide de noticias reproduciéndose activamente.
-    // Cambiar src durante la reproducción dispara onEnded prematuro en algunos navegadores.
-    if (isSlidePlaying && (isNewsSlide || isNewsImageAudio)) return;
-
     if (isNewsIntroActive || isPreRollOverlayActive) return;
 
     const audioUrl = isNewsSlide ? (currentSlide?.audioUrl || null) : (currentVideo?.audioSourceUrl || null);
@@ -237,15 +233,23 @@ const VideoSection: React.FC = () => {
         const extra = (currentVideo as any)?.volumen_extra || 1;
         const targetVolume = Math.min(1, (volume || 1) * extra);
         audioRef.current.volume = isMuted ? 0 : (isHtmlSlideActive ? 1 : targetVolume);
+        // Solo reasignar src si es DIFERENTE al actual.
+        // Re-asignar el mismo src resetea el elemento en algunos navegadores y dispara onEnded prematuro.
         if (audioRef.current.src !== audioUrl) {
           console.log('[AudioSync] Cambiando src a:', audioUrl.slice(-60));
           audioRef.current.src = audioUrl;
+          hasStartedAudioRef.current = false; // Nuevo src = nuevo ciclo de reproducción
         }
-        console.log('[AudioSync] Llamando play() — isNewsSlide:', isNewsSlide, 'hasStartedAudio:', hasStartedAudioRef.current);
-        hasStartedAudioRef.current = true;
-        audioRef.current.play().catch((err) => {
-          console.warn("[VideoSection] Play audio noticia:", err);
-        });
+        // Solo llamar play() si no estaba sonando ya este src
+        if (!hasStartedAudioRef.current || audioRef.current.paused) {
+          console.log('[AudioSync] Llamando play() — isNewsSlide:', isNewsSlide, 'hasStartedAudio:', hasStartedAudioRef.current, 'paused:', audioRef.current.paused);
+          hasStartedAudioRef.current = true;
+          audioRef.current.play().catch((err) => {
+            console.warn("[VideoSection] Play audio noticia:", err);
+          });
+        } else {
+          console.log('[AudioSync] Audio ya reproduciendo, no se llama play()');
+        }
       }
     } else if (!isNewsSlide && !isNewsImageAudio) {
       if (audioRef.current && !audioRef.current.paused) {
@@ -254,7 +258,7 @@ const VideoSection: React.FC = () => {
         audioRef.current.src = "";
       }
     }
-  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume, currentVideo, isHtmlSlideActive, isSlidePlaying]);
+  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume, currentVideo, isHtmlSlideActive]);
 
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
