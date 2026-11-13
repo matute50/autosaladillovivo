@@ -18,8 +18,14 @@ import json
 import re
 import time
 import logging
-from datetime import datetime
 from typing import Dict, Optional
+from datetime import datetime
+
+try:
+    import requests as _req
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 logger = logging.getLogger("AraScriptAgent")
 logger.setLevel(logging.INFO)
@@ -101,7 +107,13 @@ class AraScriptAgent:
         self.providers = self._load_providers()
 
     def _load_providers(self) -> dict:
-        """Carga proveedores de IA (free-first: Gemini → Groq → GLM → OpenRouter)."""
+        """Carga proveedores de IA (free-first: Gemini → Groq → GLM → OpenRouter).
+
+        Las keys GEMINI_API_KEY_01.._N en .env pueden ser formato AQ.Ab...
+        (OAuth nuevo) que NO funcionan con el SDK google-genai pero sí
+        con la API REST directa via ?key=. Se prueban secuencialmente hasta
+        encontrar una activa.
+        """
         env = {}
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for filename in ('.env.local', '.env'):
@@ -120,26 +132,46 @@ class AraScriptAgent:
         env.update(os.environ)
 
         providers = {}
-        for prefix, url in [
-            ('gemini', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'),
-            ('gemini_fallback', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'),
-        ]:
-            key = env.get('GEMINI_API_KEY') or env.get('GOOGLE_API_KEY') or ''
-            if not key:
-                # Intentar con claves múltiples (GEMINI_API_KEY_02, etc.)
-                for idx in range(2, 20):
-                    alt_key = env.get(f'GEMINI_API_KEY_{idx:02d}')
-                    if alt_key:
-                        key = alt_key
-                        break
-            if key and key not in providers:
-                providers['gemini'] = {
-                    'name': 'Google Gemini Flash',
-                    'url': url,
-                    'key': key,
-                    'priority': 1,
-                }
-                break
+
+        # ------------------------------------------------------------------
+        # Gemini — probar cada key contra el endpoint real para encontrar una activa.
+        # Las keys formato AQ.Ab... son OAuth-style; muchas pueden estar expiradas (401)
+        # o ser de modelos descontinuados (404). Se hace un probe ligero con cada una.
+        # ------------------------------------------------------------------
+        gemini_url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+        gemini_key = env.get('GEMINI_API_KEY') or env.get('GOOGLE_API_KEY') or ''
+
+        def _probe_gemini_key(key: str) -> bool:
+            try:
+                resp = _req.post(
+                    f"{gemini_url}?key={key}",
+                    json={'contents': [{'parts': [{'text': '{"v":"1"}'}]}],
+                          'generationConfig': {'maxOutputTokens': 5}},
+                    timeout=10,
+                )
+                return resp.status_code == 200
+            except Exception:
+                return False
+
+        if gemini_key and _probe_gemini_key(gemini_key):
+            providers['gemini'] = {
+                'name': 'Google Gemini Flash',
+                'url': gemini_url,
+                'key': gemini_key,
+                'priority': 1,
+            }
+        else:
+            # Probar claves secuenciales GEMINI_API_KEY_01 .. _N hasta encontrar activa
+            for idx in range(1, 20):
+                alt_key = env.get(f'GEMINI_API_KEY_{idx:02d}') or env.get(f'GEMINI_API_KEY_{idx}')
+                if alt_key and _probe_gemini_key(alt_key):
+                    providers['gemini'] = {
+                        'name': f'Google Gemini Flash (key_{idx:02d})',
+                        'url': gemini_url,
+                        'key': alt_key,
+                        'priority': 1,
+                    }
+                    break
 
         groq_key = env.get('GROQ_API_KEY', '')
         if groq_key:
@@ -161,13 +193,16 @@ class AraScriptAgent:
                 'priority': 3,
             }
 
-        openrouter_key = env.get('OPENROUTER_API_KEY', '')
+        openrouter_key = (env.get('OPENROUTER_API_KEY') 
+                        or env.get('HERMES_OPENROUTER_FREE_API_KEY', ''))
         if openrouter_key:
+            # Preferir Gemini 2.5 Flash via OpenRouter (más capaz que el modelo free por defecto)
+            model = env.get('OPENROUTER_MODEL', 'google/gemini-2.5-flash')
             providers['openrouter'] = {
                 'name': 'OpenRouter Free Tier',
                 'url': 'https://openrouter.ai/api/v1/chat/completions',
                 'key': openrouter_key,
-                'model': env.get('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
+                'model': model,
                 'priority': 4,
             }
 
@@ -185,8 +220,10 @@ class AraScriptAgent:
             'NEUTRAL': 'informativo_servicio',
         }
         tenor = tono_map.get(str(tono).upper(), 'informativo_servicio')
+        # Determinar permitir_sonrisa a partir del tenor
+        sonriente = tenor in ('alegre_cultural', 'informativo_servicio')
 
-        TEMPLATE = r"""Eres el director creativo de "Ara", el espacio periodístico televisivo más prestigioso de Argentina. Tu tarea es transformar esta noticia local de Saladillo en un guión ESTRUCTURADO para presentación televisiva profesional.
+        TEMPLATE = """Eres el director creativo de "Ara", espacio periodístico televisivo femenino profesional de Saladillo Vivo. Transforma esta noticia local en un guión ESTRUCTURADO para presentación televisiva.
 
 NOTICIA — TÍTULO RADIAL:
 __TITLE_RADIAL__
@@ -207,7 +244,7 @@ Debes generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
   },
   "meta_ara": {
     "tenor": "__TENOR__",
-    "permitir_sonrisa": __EXAMPLE_PERMITIR__,
+    "permitir_sonrisa": __SONRIENTE__,
     "tono_vocal": "__EXAMPLE_TONO__",
     "expresion_inicio": "__EXAMPLE_EXPRESION_INICIO__",
     "expresion_desarrollo": "__EXAMPLE_EXPRESION_DESC__",
@@ -215,52 +252,48 @@ Debes generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
     "lenguaje_corporal": "__EXAMPLE_LENG_CORP__",
     "ambiente_sonoro": "__EXAMPLE_AMBIENTE__",
     "ritmo_camara": "__EXAMPLE_RITMO__",
-    "requiere_aprobacion_sensible": __EXAMPLE_REQUiere__
+    "requiere_aprobacion_sensible": __REQUIERE__
   }
 }
 
 REGLAS ESTRICTAS PARA CADA CAMPO:
 
 GUION_ARA:
-- Es el texto que EL LOCUTOR dice ON-CAMERA, NO es el artículo completo.
-- Extensión máxima absoluta: 22 palabras (tolerancia ±3 palabras; nunca exceder 25).
+- Es el texto que ARA dice ON-CAMERA, NO es el artículo completo.
+- Extensión MÁXIMA ABSOLUTA: exactamente 20 palabras (rango aceptable 18 a 22). Si el borrador tiene más de 22, reducilo SIN cortar oraciones hasta llegar a 20. Contá las palabras antes de enviar.
+- NUNCA cortes la última palabra ni dejes una oración incompleta (prohibido terminar con "...para el." o similares). La última oración debe cerrar con punto final y sentido completo.
 - En español argentino rioplatense, estilo directo, cercano y profesional.
 - No incluir título ni repetición de palabras del gancho.
-- Debe contener: dato principal + contexto breve + cierre natural.
-- Ejemplo correcto (22 palabras): "Una jornada que dejó saldo positivo en el deporte local. El equipo de Saladillo se impuso 3 a 1 y ahora lidera el torneo regional con cinco puntos de ventaja."
+- Debe contener: titular directo + dato concreto + invitación breve a entrar a Saladillo Vivo acorde al tenor.
+- PROHIBIDO usar siglas alfanuméricas impronunciables como códigos (ej. evita "ASTRAN25"); escribe los números con letras (ej. "tres a dos" en lugar de "3-2").
+- Ejemplo correcto (22 palabras): "Una jornada que dejó saldo positivo en el deporte local. El equipo de Saladillo se impuso tres a uno y ahora lidera el torneo regional con cinco puntos de ventaja."
 
 VOLANTA_ZOCALO:
-- Máximo 3 palabras. Sustantivo o verbo en infinitivo. Ej: "VIDA ÚTIL", "DEPORTES", "OBRAS".
+- Máximo 3 palabras. Sustantivo o verbo en infinitivo con sentido completo. Ej: "VIDA ÚTIL", "DEPORTES", "OBRAS".
 
 TITULO_ZOCALO:
-- Hasta 7 u 8 palabras. Frase declarativa o imperativa potente. Ej: "Nuevo horario para el transporte municipal".
+- Hasta 7 u 8 palabras. Frase declarativa completa, nunca truncada por cantidad de caracteres. Ej: "Nuevo horario para el transporte municipal".
 
-TONO (meta_ara):
-- Valor uno de: alegre_cultural | informativo_servicio | alerta_utilidad | policial_grave | sensible_luto
-- Derivarlo del tono general de la noticia. Para noticias deportivas, fiestas, cultura → alegre_cultural. Para servicios, horarios, anuncios → informativo_servicio.
+TONO_VOCAL (meta_ara):
+- Siempre describe voz FEMENINA joven, clara, cálido/expresiva cuando permettre sonrisa, sobria/serena cuando不允许.
+- Incluir siempre "español argentino rioplatense".
+- Ejemplo alegre: "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
+- Ejemplo sobrio: "Femenina joven, tono sereno y sobrio, español argentino rioplatense"
 
-PERMITIR_SONRISA:
-- true si el tenor lo permite (cultural, deportivo, festejos, servicio útil).
-- false si es sensible (luto, tragedia, accidente grave, policial grave con víctimas).
+EXPRESION_INICIO:
+- DESCRIPCIÓN PURAMENTE VISUAL del gesto facial/mirada. PROHIBIDO incluir cualquier palabra hablada, diálogo,引述 o expresión entre comillas/negrita.
+- Mal ejemplo (incorrecto): "Saluda mientras dice «Buenas»" ← NUNCA poner esto.
+- Bien ejemplo (correcto): "Mirá fija al lente con leve asentimiento inicial, tono cálido pero contenido"
+- La locución va exclusiva en guion_ara; este campo solo describe GESTOS Y MIRADAS.
 
-TONO_VOCAL:
-- Descripción concisa del tipo de voz. Incluir "español argentino rioplatense" siempre.
-- Ej: "Varonil media edad, tono claro y pausado, español argentino rioplatense con modulación cálida"
-- Ej: "Femenina joven, tono dinámico y luminoso, español argentino rioplatense porteño-bonaerense"
-
-EXPRESION_INICIO / DESARROLLO / CIERRE:
-- Descripciones en tercera persona, estilo director de casting.
-- Inicio: qué hace el locutor en los primeros segundos antes/durante hablar.
-- Desarrollo: cómo se comporta durante toda la lectura.
-- Cierre: gesto final que no contradiga el tenor.
+EXPRESION_DESARROLLO / EXPRESION_CIERRE:
+- Descripciones en tercera persona, estilo director de casting. Sin diálogos spoken.
 
 LENGUAJE_CORPORAL:
 - Uno de: manos_sueltas_natural | postura_firme_contenida | quietud_respetuosa
 
 AMBIENTE_SONORO:
-- Descripción realista del sonido ambiental de Saladillo acorde al tenor.
-- Volumen siempre bajo o muy bajo.
-- Ej: "Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo"
+- Descripción realista del sonido ambiental de Saladillo acorde al tenor. Volumen siempre bajo o muy bajo.
 
 RITMO_CAMARA:
 - Uno de: micro_acercamiento_suave | plano_fijo_estable
@@ -276,7 +309,8 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         result = result.replace('__TITLE_RADIAL__', title_radial)
         result = result.replace('__CONTENT__', content)
         result = result.replace('__TENOR__', tenor)
-        result = result.replace('__EXAMPLE_PERMITIR__', 'true' if tenor in ('alegre_cultural', 'informativo_servicio') else 'false')
+        result = result.replace('__SONRIENTE__', 'true' if sonriente else 'false')
+        result = result.replace('__REQUIERE__', 'true' if not sonriente else 'false')
         return result
 
     def _call_gemini(self, prompt: str, provider: dict) -> Optional[Dict]:
@@ -348,10 +382,32 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             resp = req.post(provider['url'], headers=headers, json=data, timeout=45)
             if resp.status_code == 200:
                 content = resp.json()['choices'][0]['message']['content']
-                return self._extract_json(content)
+                result = self._extract_json(content)
+                # Post-procesamiento: asegurar que guion no exceda 25 palabras
+                if result and 'contenido' in result:
+                    guion = result['contenido'].get('guion_ara', '')
+                    if len(guion.split()) > 25:
+                        result['contenido']['guion_ara'] = self._truncate_to_sentence_limit(guion, max_words=25)
+                return result
         except Exception as e:
             logger.warning(f"[AraScript] Error con OpenRouter: {e}")
         return None
+
+    @staticmethod
+    def _truncate_to_sentence_limit(text: str, max_words: int) -> str:
+        """Trunca texto respetando límites de palabras y cortes por frases completas."""
+        words = text.split()
+        if len(words) <= max_words:
+            return text
+        # Cortar por oraciones completas dentro del límite
+        truncated = ' '.join(words[:max_words])
+        # Encontrar último punto seguido de espacio para cortar limpio
+        last_period = truncated.rfind('. ')
+        if last_period > len(truncated) * 0.6:
+            truncated = truncated[:last_period + 1]
+        else:
+            truncated = truncated.rstrip() + '.'
+        return truncated.strip()
 
     @staticmethod
     def _extract_json(text: str) -> Optional[Dict]:
@@ -379,58 +435,120 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
     # VALIDACIÓN LOCAL
     # ------------------------------------------------------------------
     @staticmethod
-    def validate_ara_json(data: Dict) -> tuple[bool, list[str]]:
-        """Valida que el JSON Ara cumpla las reglas contractuales. Retorna (ok, errores)."""
+    def _validate_persona_and_style(data: Dict) -> tuple[bool, list[str]]:
+        """Validaciones adicionales de persona (femenina) y estilo (sin diálogos en expresiones)."""
         errors = []
+        meta = data.get('meta_ara', {})
+        contenido = data.get('contenido', {})
+
+        # ---- 1. Tono vocal: prohibido masculino ----
+        tono_vocal = (meta.get('tono_vocal') or '').lower()
+        MASCULINE_MARKERS = ['varonil', 'masculino', 'hombre', 'grave profundo', 'barítono']
+        for marker in MASCULINE_MARKERS:
+            if marker in tono_vocal:
+                errors.append(f"'tono_vocal' contiene término masculino: '{marker}'")
+        if 'femenina' not in tono_vocal and 'mujer' not in tono_vocal:
+            errors.append("'tono_vocal' debe describir voz femenina; faltan 'femenina' o 'mujer'")
+
+        # ---- 2. Expresión inicio: prohibido diálogo spoken ----
+        exp_inicio = (meta.get('expresion_inicio') or '')
+        DIALOGUE_MARKERS = ['dice', 'dice «', 'dice "', 'refiriéndose a', 'mientras dice',
+                            'saluda', 'pregunta', 'responde', 'exclama']
+        for marker in DIALOGUE_MARKERS:
+            if marker in exp_inicio.lower():
+                errors.append(
+                    f"'expresion_inicio' contiene palabra hablada ('{marker}'). "
+                    "Solo se permiten descripciones visuales de gestos/miradas."
+                )
+                break
+
+        # ---- 3. Guion completo: última oración no truncada ----
+        guion = contenido.get('guion_ara', '')
+        if guion:
+            last_word = guion.strip().split()[-1] if guion.strip().split() else ''
+            if last_word.startswith('...') or last_word.endswith('.') is False and not any(
+                last_word.endswith(c) for c in '.!¿?') :
+                pass  # ok
+            # Check for obvious truncation patterns
+            truncation_patterns = [
+                '... para', '... y ', '... al ', '... del ', '... los ', '... las ',
+                '... un ', '... una ', '... el ', '... la ', '... en ',
+            ]
+            for pat in truncation_patterns:
+                if guion.rstrip().endswith(pat.rstrip()):
+                    errors.append(f"'guion_ara' parece truncado al final: '{pat}'")
+                    break
+            # Must end with proper punctuation
+            if guion.strip() and not any(guion.rstrip().endswith(c) for c in '.!¡?'):
+                errors.append("'guion_ara' no termina con puntuación final")
+
+        # ---- 4. Sin siglas alfanuméricas impronunciables ----
+        import re as _re
+        alphanumeric_code = _re.search(r'[A-Z]{2,}\d+', guion)
+        if alphanumeric_code:
+            errors.append(f"'guion_ara' contiene sigla alfanumérica impronunciable: '{alphanumeric_code.group()}'")
+
+        return len(errors) == 0, errors
+
+    # ------------------------------------------------------------------
+    # VALIDACIÓN ESTRUCTURAL COMPLETA
+    # ------------------------------------------------------------------
+    @staticmethod
+    def validate_ara_json(data: Dict) -> tuple[bool, list[str]]:
+        """Valida estructura + persona + estilo del JSON Ara."""
+        all_errors: list[str] = []
 
         if not isinstance(data, dict):
             return False, ["El resultado no es un objeto JSON"]
 
-        # version
         if data.get('version') != '1.0':
-            errors.append("'version' debe ser '1.0'")
+            all_errors.append("'version' debe ser '1.0'")
 
-        # contenido
         contenido = data.get('contenido')
         if not isinstance(contenido, dict):
-            errors.append("'contenido' es requerido y debe ser un objeto")
+            all_errors.append("'contenido' es requerido y debe ser un objeto")
         else:
             guion = contenido.get('guion_ara', '')
-            words = guion.split()
+            words = guion.split() if guion else []
             if not guion or len(guion) < 10:
-                errors.append("'guion_ara' vacío o demasiado corto")
+                all_errors.append("'guion_ara' vacío o demasiado corto")
             elif len(words) > 25:
-                errors.append(f"'guion_ara' excede 25 palabras ({len(words)})")
+                all_errors.append(f"'guion_ara' excede 25 palabras ({len(words)})")
             elif len(words) < 15:
-                # Advertencia, no error crítico — se puede arreglar con fallback
-                errors.append(f"'guion_ara' tiene solo {len(words)} palabras (ideal 18-22)")
+                all_errors.append(f"'guion_ara' tiene solo {len(words)} palabras (ideal 18-22)")
 
             volanta = contenido.get('volanta_zocalo', '')
             if not volanta:
-                errors.append("'volanta_zocalo' vacío")
+                all_errors.append("'volanta_zocalo' vacío")
             elif len(volanta.split()) > 3:
-                errors.append(f"'volanta_zocalo' excede 3 palabras ({len(volanta.split())})")
+                all_errors.append(f"'volanta_zocalo' excede 3 palabras ({len(volanta.split())})")
 
             titulo_z = contenido.get('titulo_zocalo', '')
             if not titulo_z:
-                errors.append("'titulo_zocalo' vacío")
+                all_errors.append("'titulo_zocalo' vacío")
             elif len(titulo_z.split()) > 8:
-                errors.append(f"'titulo_zocalo' excede 8 palabras ({len(titulo_z.split())})")
+                all_errors.append(f"'titulo_zocalo' excede 8 palabras ({len(titulo_z.split())})")
 
-        # meta_ara
         meta = data.get('meta_ara')
         if not isinstance(meta, dict):
-            errors.append("'meta_ara' es requerido y debe ser un objeto")
+            all_errors.append("'meta_ara' es requerido y debe ser un objeto")
         else:
             tenor = meta.get('tenor', '')
             if tenor not in TENOR_VALUES:
-                errors.append(f"'tenor' inválido: '{tenor}'. Valores permitidos: {TENOR_VALUES}")
+                all_errors.append(f"'tenor' inválido: '{tenor}'. Valores permitidos: {TENOR_VALUES}")
 
             permitir = meta.get('permitir_sonrisa')
             if not isinstance(permitir, bool):
-                errors.append("'permitir_sonrisa' debe ser booleano")
+                all_errors.append("'permitir_sonrisa' debe ser booleano")
 
-            # Bloquear palabras incompatibles cuando不允许 sonrisa
+            lenguaje = meta.get('lenguaje_corporal', '')
+            if lenguaje not in LENGUAJE_CORPORAL_VALUES:
+                all_errors.append(f"'lenguaje_corporal' inválido: '{lenguaje}'")
+
+            ritmo = meta.get('ritmo_camara', '')
+            if ritmo not in RITMO_CAMARA_VALUES:
+                all_errors.append(f"'ritmo_camara' inválido: '{ritmo}'")
+
             if permitir is False:
                 PROHIBITED_WORDS = ['sonrisa', 'sonriendo', 'sonriente', 'alegre',
                                     'entusiasta', 'divertido', 'jovial', 'risas']
@@ -440,7 +558,7 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                                 'guion_ara')
                 for key in checked_keys:
                     val = ''
-                    if key in contenido and isinstance(contenido[key], str):
+                    if key in contenido and isinstance(contenido.get(key), str):
                         val = contenido[key]
                     elif not val and meta.get(key) and isinstance(meta.get(key), str):
                         val = meta[key]
@@ -449,20 +567,16 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 combined = ' '.join(text_fields_to_check)
                 found = [w for w in PROHIBITED_WORDS if w in combined]
                 if found:
-                    errors.append(
+                    all_errors.append(
                         f"'permitir_sonrisa=False' pero se encontraron palabras "
                         f"incompatibles en campos descriptivos: {found}"
                     )
 
-            lenguaje = meta.get('lenguaje_corporal', '')
-            if lenguaje not in LENGUAJE_CORPORAL_VALUES:
-                errors.append(f"'lenguaje_corporal' inválido: '{lenguaje}'")
+        # ---- Validación de persona y estilo (femenina, sin diálogos) ----
+        persona_ok, persona_err = AraScriptAgent._validate_persona_and_style(data)
+        all_errors.extend(persona_err)
 
-            ritmo = meta.get('ritmo_camara', '')
-            if ritmo not in RITMO_CAMARA_VALUES:
-                errors.append(f"'ritmo_camara' inválido: '{ritmo}'")
-
-        return len(errors) == 0, errors
+        return len(all_errors) == 0, all_errors
 
     @staticmethod
     def apply_heuristic_fallback(title: str, content: str, tono: str) -> Dict:
@@ -524,10 +638,15 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             "meta_ara": {
                 "tenor": tenor,
                 "permitir_sonrisa": permitir_sonrisa,
-                "tono_vocal": "Varonil media edad, tono claro y pausado, español argentino rioplatense",
-                "expresion_inicio": "Mirá fija al lente con leve asentimiento inicial mientras dice «Buenas», tono cálido",
+                "tono_vocal": ("Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
+                               if permitir_sonrisa else "Femenina joven, tono sereno y sobrio, español argentino rioplatense"),
+                "expresion_inicio": (
+                    "Mirá fija al lente con leve asentimiento inicial, expresión abierta y cercana"
+                    if permitir_sonrisa else
+                    "Mirada seria al lente, leve inclinación de cabeza, expresión compasiva y contenida"
+                ),
                 "expresion_desarrollo": EXPRESION_desarrollo_VALUES.get(tenor, "gestos naturales, mantiene contacto visual constante"),
-                "expresion_cierre": "Despedida con leve asentimiento, mantiene la mirada al lente antes de cerrar",
+                "expresion_cierre": "Despedida con leve asentimiento sereno, mantiene la mirada al lente antes de cerrar",
                 "lenguaje_corporal": "postura_firme_contenida",
                 "ambiente_sonoro": AMBIENTE_SONORO_VALUES[0],
                 "ritmo_camara": "micro_acercamiento_suave",
@@ -585,6 +704,14 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 break
 
         # Validar resultados
+        # Fail-open: si NO hay ningún proveedor configurado, retornar None
+        # para que el pipeline deje ara_json=NULL y reintente después.
+        has_providers = any(self.providers.get(k) and self.providers[k].get('key')
+                            for k in ['gemini', 'groq', 'openrouter'])
+        if not has_providers:
+            logger.warning("[AraScriptAgent] Ningún proveedor de IA configurado — fail-open (no guarda)")
+            return None
+
         if ara_result:
             ok, errs = self.validate_ara_json(ara_result)
             if not ok:

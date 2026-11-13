@@ -60,8 +60,8 @@ class TestAraValidation(unittest.TestCase):
             "meta_ara": {
                 "tenor": tenor,
                 "permitir_sonrisa": True,
-                "tono_vocal": "Varonil media edad, español argentino rioplatense",
-                "expresion_inicio": "Mira al lente y asiente",
+                "tono_vocal": "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense",
+                "expresion_inicio": "Mirada directa al lente con leve asentimiento",
                 "expresion_desarrollo": "Gestos naturales con ambas manos",
                 "expresion_cierre": "Asentimiento final sereno",
                 "lenguaje_corporal": "postura_firme_contenida",
