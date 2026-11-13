@@ -223,6 +223,10 @@ const VideoSection: React.FC = () => {
 
   // Audio Sync - Sincroniza el audio centralizado cuando termina la intro de noticias
   useEffect(() => {
+    // NO tocar el audio si hay un slide de noticias reproduciéndose activamente.
+    // Cambiar src durante la reproducción dispara onEnded prematuro en algunos navegadores.
+    if (isSlidePlaying && (isNewsSlide || isNewsImageAudio)) return;
+
     if (isNewsIntroActive || isPreRollOverlayActive) return;
 
     const audioUrl = isNewsSlide ? (currentSlide?.audioUrl || null) : (currentVideo?.audioSourceUrl || null);
@@ -234,19 +238,23 @@ const VideoSection: React.FC = () => {
         const targetVolume = Math.min(1, (volume || 1) * extra);
         audioRef.current.volume = isMuted ? 0 : (isHtmlSlideActive ? 1 : targetVolume);
         if (audioRef.current.src !== audioUrl) {
+          console.log('[AudioSync] Cambiando src a:', audioUrl.slice(-60));
           audioRef.current.src = audioUrl;
         }
+        console.log('[AudioSync] Llamando play() — isNewsSlide:', isNewsSlide, 'hasStartedAudio:', hasStartedAudioRef.current);
+        hasStartedAudioRef.current = true;
         audioRef.current.play().catch((err) => {
           console.warn("[VideoSection] Play audio noticia:", err);
         });
       }
     } else if (!isNewsSlide && !isNewsImageAudio) {
       if (audioRef.current && !audioRef.current.paused) {
+        console.log('[AudioSync] Pausando audio (no es slide ni imagen):', audioRef.current.src.slice(-40));
         audioRef.current.pause();
         audioRef.current.src = "";
       }
     }
-  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume, currentVideo, isHtmlSlideActive]);
+  }, [isNewsIntroActive, isPreRollOverlayActive, isNewsSlide, isNewsImageAudio, currentSlide?.audioUrl, currentVideo?.audioSourceUrl, isMuted, volume, currentVideo, isHtmlSlideActive, isSlidePlaying]);
 
   // Reset del ref cuando el contenido específico cambia (ej: de un slide .html a otro)
   useEffect(() => {
@@ -682,15 +690,31 @@ const VideoSection: React.FC = () => {
                 } catch (err) {}
               }}
               onEnded={() => {
+                console.log('[Audio-Ended] →', {
+                  isHtmlSlideActive,
+                  isNewsSlide,
+                  isNewsImageAudio,
+                  currentTime: audioRef.current?.currentTime,
+                  duration: audioRef.current?.duration,
+                  paused: audioRef.current?.paused,
+                  networkState: audioRef.current?.networkState
+                });
                 if (isHtmlSlideActive || isNewsSlide || isNewsImageAudio) {
                   // Cancelar cualquier timer pendiente; onEnded es la fuente de verdad.
                   if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
                   stopSlide();
                   resumeAfterSlide();
+                } else {
+                  console.log('[Audio-Ended] → SKIP (no es slide activo)');
                 }
               }}
               onError={(e) => {
-                console.error("[VideoSection] Error reproduciendo audio noticia:", e);
+                const audioEl = audioRef.current;
+                console.error("[VideoSection] Audio error — code:", (e.target as HTMLAudioElement).error?.code, "mediaError:", audioEl?.error, {
+                  currentTime: audioEl?.currentTime,
+                  duration: audioEl?.duration,
+                  networkState: audioEl?.networkState
+                });
                 // Si hay error de carga (CORS, red, archivo truncado), cerramos el slide
                 // para no dejarlo colgado indefinidamente sin audio.
                 if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
