@@ -273,7 +273,13 @@ export async function getRandomMusicalVideo(excludeId?: string): Promise<Video |
     const { data, error } = await query.limit(50);
     if (error || !data || data.length === 0) return null;
 
-    return data[Math.floor(Math.random() * data.length)];
+    // Normalizar id a string para consistencia con el resto del sistema (los IDs numéricos de Supabase)
+    const item = data[Math.floor(Math.random() * data.length)];
+    return {
+      ...item,
+      id: String(item.id),
+      createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : new Date().toISOString(),
+    };
   } catch (error) {
     console.error('Error in getRandomMusicalVideo:', error);
     return null;

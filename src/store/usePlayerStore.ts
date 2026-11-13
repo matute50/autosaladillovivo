@@ -370,6 +370,7 @@ export const usePlayerStore = create<PlayerState>()(
                     console.log('[usePlayerStore] finishIntro → fetching random musical video (category: clips)...');
                     const musical = await get().fetchRandomMusicalVideo();
                     console.log('[usePlayerStore] finishIntro → musical fetched:', musical ? musical.id + ' (' + (musical.url || '').slice(0, 60) + ')' : 'null');
+                    console.log('[usePlayerStore] finishIntro → BEFORE set: currentVideo id =', get().currentVideo?.id);
                     set({
                         currentVideo: musical,
                         isPreRollOverlayActive: false,
@@ -379,6 +380,7 @@ export const usePlayerStore = create<PlayerState>()(
                         isPostNewsFadeIn: true,  // trigger 0.3s video fade-in
                         isPostNewsMusical: !!musical  // keep flag while musical plays; cleared in handleOnEnded
                     });
+                    console.log('[usePlayerStore] finishIntro → state set, musical:', musical?.id, 'isContentPlaying:', true);
                     if (!musical) {
                         // No clips disponibles: restaurar directamente el video guardado
                         console.log('[usePlayerStore] finishIntro → no musical found, restoring savedVideo directly');

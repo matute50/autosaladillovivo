@@ -132,6 +132,8 @@ const VideoSection: React.FC = () => {
   useEffect(() => {
     if (!currentVideo) return;
 
+    console.log('[VideoSection] Slot effect triggered — activeSlot:', activeSlot, 'currentVideo:', currentVideo.id, 'slotA:', slotAVideo?.id, 'slotB:', slotBVideo?.id, 'nextVideo:', nextVideo?.id);
+
     if (activeSlot === 'A') {
       if (slotBVideo?.id === currentVideo.id) {
         // Swap A -> B sin corte
