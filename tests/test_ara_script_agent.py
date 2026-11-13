@@ -26,11 +26,9 @@ class TestAraPromptBuilder(unittest.TestCase):
         )
         self.assertIn("Sivero vende vacunos en Saladillo", prompt)
         self.assertIn("Una jornada récord de venta de ganados.", prompt)
-        # El tono se mapea directamente, no usa placeholder
         self.assertIn("informativo_servicio", prompt)
 
     def test_build_prompt_tenor_neutral_mapea(self):
-        """NEUTRAL → informational_servicio (tenor por defecto)."""
         prompt = self.agent._build_prompt("Título", "Contenido", "NEUTRAL")
         self.assertIn("informativo_servicio", prompt)
 
@@ -136,6 +134,24 @@ class TestAraValidation(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(errs, ["El resultado no es un objeto JSON"])
 
+    def test_prohibited_words_blocked_when_not_allowed(self):
+        """当 permitir_sonrisa=False, palabras como 'sonrisa' deben bloquearse."""
+        data = self._make_valid_json()
+        data["meta_ara"]["tenor"] = "policial_grave"
+        data["meta_ara"]["permitir_sonrisa"] = False
+        data["meta_ara"]["expresion_inicio"] = "Sonrisa leve mientras mira al lente"
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok)
+        self.assertTrue(any("incompatibles" in e for e in errs))
+
+    def test_no_false_positive_on_permitir_sonrisa_true(self):
+        """当 permitir_sonrisa=True, 'sonrisa' no debe ser rechazada."""
+        data = self._make_valid_json()
+        data["meta_ara"]["permitir_sonrisa"] = True
+        data["meta_ara"]["expresion_desarrollo"] = "Sonríe moderadamente entre frase y frase"
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertTrue(ok, f"Falso positivo: {errs}")
+
 
 class TestHeuristicFallback(unittest.TestCase):
     """Pruebas del fallback heurístico cuando falla la API de IA."""
@@ -163,6 +179,9 @@ class TestHeuristicFallback(unittest.TestCase):
         self.assertEqual(data["meta_ara"]["tenor"], "sensible_luto")
         self.assertFalse(data["meta_ara"]["permitir_sonrisa"])
         self.assertTrue(data["meta_ara"]["requiere_aprobacion_sensible"])
+        # Debe pasar validación sin errores
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertTrue(ok, f"Sensible tone failed validation: {errs}")
 
     def test_fallback_clamps_volanta_words(self):
         data = self.agent.apply_heuristic_fallback(
@@ -182,6 +201,22 @@ class TestHeuristicFallback(unittest.TestCase):
         titulo = data["contenido"]["titulo_zocalo"]
         self.assertLessEqual(len(titulo.split()), 8)
 
+    def test_fallback_short_content_guarantees_18_words(self):
+        """Si el contenido es muy corto, el fallback debe expandir con el título hasta 18 palabras."""
+        data = self.agent.apply_heuristic_fallback(
+            title="Festival de música en Saladillo congrega a vecinos",
+            content="Una noticia corta.",
+            tono="ALEGRE",
+        )
+        guion = data["contenido"]["guion_ara"]
+        words = len(guion.split())
+        self.assertGreaterEqual(words, 18,
+                                f"Guion muy corto: {words} palabras — '{guion}'")
+        self.assertLessEqual(words, 25,
+                             f"Guion excede máximo: {words} palabras")
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertTrue(ok, f"Fallo validación: {errs}")
+
 
 class TestExtractJson(unittest.TestCase):
     """Pruebas de extracción segura de JSON desde texto libre."""
@@ -194,9 +229,7 @@ class TestExtractJson(unittest.TestCase):
 
     def test_json_with_markdown_wrappers(self):
         raw = "```json\n{'version': '1.0'}\n```"
-        # Python json.loads necesita comillas dobles; aquí el regex captura el bloque
         result = AraScriptAgent._extract_json(raw)
-        # Puede fallar si solo hay comillas simples — aceptamos None como correcto
         if result is not None:
             self.assertIsInstance(result, dict)
 

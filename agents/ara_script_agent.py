@@ -430,6 +430,30 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             if not isinstance(permitir, bool):
                 errors.append("'permitir_sonrisa' debe ser booleano")
 
+            # Bloquear palabras incompatibles cuando不允许 sonrisa
+            if permitir is False:
+                PROHIBITED_WORDS = ['sonrisa', 'sonriendo', 'sonriente', 'alegre',
+                                    'entusiasta', 'divertido', 'jovial', 'risas']
+                text_fields_to_check = []
+                checked_keys = ('expresion_inicio', 'expresion_desarrollo',
+                                'expresion_cierre', 'tono_vocal', 'lenguaje_corporal',
+                                'guion_ara')
+                for key in checked_keys:
+                    val = ''
+                    if key in contenido and isinstance(contenido[key], str):
+                        val = contenido[key]
+                    elif not val and meta.get(key) and isinstance(meta.get(key), str):
+                        val = meta[key]
+                    if val:
+                        text_fields_to_check.append(str(val).lower())
+                combined = ' '.join(text_fields_to_check)
+                found = [w for w in PROHIBITED_WORDS if w in combined]
+                if found:
+                    errors.append(
+                        f"'permitir_sonrisa=False' pero se encontraron palabras "
+                        f"incompatibles en campos descriptivos: {found}"
+                    )
+
             lenguaje = meta.get('lenguaje_corporal', '')
             if lenguaje not in LENGUAJE_CORPORAL_VALUES:
                 errors.append(f"'lenguaje_corporal' inválido: '{lenguaje}'")
@@ -463,21 +487,32 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         titulo_words = first_sentence.split()[:8]
         titulo_z = ' '.join(titulo_words) if titulo_words else title[:40]
 
-        # Guion heurístico: condensar contenido a ~20 palabras
+        # Guion heurístico: condensar contenido a ~20 palabras mínimo 18
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', content) if s.strip()]
         acc = []
         wc = 0
         for s in sentences:
             parts = s.split()
+            # Acortar cada oración si excede para llegar a 18-22 palabras
             if wc + len(parts) > 22:
+                extra = 22 - wc
+                if extra >= 3:
+                    acc.append(' '.join(parts[:extra]))
                 break
             acc.append(s)
             wc += len(parts)
         guion = ' '.join(acc).strip()
         if not guion.endswith('.'):
             guion += '.'
-        if len(guion.split()) < 10:
-            guion = title + '. ' + guion
+        # Si aún está corto (<18), repetir idea clave del título
+        while len(guion.split()) < 18 and title:
+            guion += f' {title}.'
+            # Recortar si pasamos de 25
+            too_long_words = guion.split()
+            if len(too_long_words) > 25:
+                guion = ' '.join(too_long_words[:24]) + '.'
+        if not guion.endswith('.'):
+            guion += '.'
 
         return {
             "version": "1.0",
