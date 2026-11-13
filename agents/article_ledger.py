@@ -318,10 +318,26 @@ def _read_json(path):
 
 def _write_json(path, payload):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
-    os.replace(tmp_path, path)
+    # Usar un tmp realmente único por llamada (mkstemp) para evitar
+    # condiciones de carrera entre hilos del mismo proceso y entre procesos.
+    # Debe estar en el mismo directorio que `path` para que os.replace()
+    # sea atómico dentro del mismo filesystem.
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".tmp.",
+        dir=os.path.dirname(path) or ".",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        os.replace(tmp_path, path)
+    finally:
+        # Limpieza defensiva si algo falló a mitad de camino
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def load_article_state(data_dir, now_iso=None):
