@@ -97,7 +97,7 @@ export function NewsSlidePlayer({ slideUrl, onClose }: NewsSlidePlayerProps) {
           <iframe
             src={htmlContent ? undefined : slideUrl}
             srcDoc={htmlContent || undefined}
-            className="slide-iframe"
+            className="slide-iframe video-universe"
             title="Noticia en formato slide"
             sandbox="allow-same-origin allow-scripts allow-forms"
             allow="autoplay; fullscreen"
