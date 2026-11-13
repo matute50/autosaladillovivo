@@ -43,11 +43,8 @@ TENOR_VALUES = [
     "sensible_luto",
 ]
 
-EXPRESION_INICIO_VALUES = [
-    "mirá fija al lente con leve asentimiento inicial mientras dice «Buenas», tono cálido",
-    "entra con mano en el corazón y sonrisa genuina, mirada directa al lente",
-    "saluda con leve saludo de cabeza y postura firme pero cercana",
-]
+# EXPRESION_INICIO_VALUES removida: las reglas del prompt ya prohíben diálogos
+# y los ejemplos que contenía incluían palabras habladas inválidas.
 
 EXPRESION_desarrollo_VALUES = {
     "alegre_cultural": "gestos naturales con ambas manos, expresión abierta, sonríe moderadamente entre frase y frase",
@@ -261,7 +258,8 @@ REGLAS ESTRICTAS PARA CADA CAMPO:
 GUION_ARA:
 - Es el texto que ARA dice ON-CAMERA, NO es el artículo completo.
 - Extensión MÁXIMA ABSOLUTA: exactamente 20 palabras (rango aceptable 18 a 22). Si el borrador tiene más de 22, reducilo SIN cortar oraciones hasta llegar a 20. Contá las palabras antes de enviar.
-- NUNCA cortes la última palabra ni dejes una oración incompleta (prohibido terminar con "...para el." o similares). La última oración debe cerrar con punto final y sentido completo.
+- NUNCA cortes la última palabra ni dejes una oración incompleta (prohibido terminar con "…para el." o similares). La última oración debe cerrar con punto final y sentido completo.
+- La última oración SIEMPRE debe ser una invitación breve que mencione «Saladillo Vivo» acorde al tenor: cálida ("Mirá toda la información en Saladillo Vivo") en alegre/informativo; sobria y respetuosa ("Toda la información, en Saladillo Vivo.") en policial/luto.
 - En español argentino rioplatense, estilo directo, cercano y profesional.
 - No incluir título ni repetición de palabras del gancho.
 - Debe contener: titular directo + dato concreto + invitación breve a entrar a Saladillo Vivo acorde al tenor.
@@ -275,7 +273,7 @@ TITULO_ZOCALO:
 - Hasta 7 u 8 palabras. Frase declarativa completa, nunca truncada por cantidad de caracteres. Ej: "Nuevo horario para el transporte municipal".
 
 TONO_VOCAL (meta_ara):
-- Siempre describe voz FEMENINA joven, clara, cálido/expresiva cuando permettre sonrisa, sobria/serena cuando不允许.
+- Siempre describe voz FEMENINA joven, clara, cálido/expresiva cuando se permite sonrisa, sobria/serena cuando no.
 - Incluir siempre "español argentino rioplatense".
 - Ejemplo alegre: "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
 - Ejemplo sobrio: "Femenina joven, tono sereno y sobrio, español argentino rioplatense"
@@ -293,7 +291,9 @@ LENGUAJE_CORPORAL:
 - Uno de: manos_sueltas_natural | postura_firme_contenida | quietud_respetuosa
 
 AMBIENTE_SONORO:
-- Descripción realista del sonido ambiental de Saladillo acorde al tenor. Volumen siempre bajo o muy bajo.
+|- Descripción REALISTA del sonido ambiental callejero de Saladillo acorde al tenor. Volumen SIEMPRE bajo o muy bajo.
+|- PROHIBIDO mencionar música, instrumental, estudio o corrientes de producción. Ara está en la vía pública; solo se permite sonido urbano ambiental (tráfico lejano, murmullo, viento, pájaros).
+|- Si no hay suficiente contenido para generar ambiente sonoro realista, usar: "Silencio urbano mínimo, sin música ni ruido destacado".
 
 RITMO_CAMARA:
 - Uno de: micro_acercamiento_suave | plano_fijo_estable
@@ -386,6 +386,7 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 # Post-procesamiento: asegurar que guion no exceda 25 palabras
                 if result and 'contenido' in result:
                     guion = result['contenido'].get('guion_ara', '')
+                    guion = self._sanitize_acronyms(guion)
                     if len(guion.split()) > 25:
                         result['contenido']['guion_ara'] = self._truncate_to_sentence_limit(guion, max_words=25)
                 return result
@@ -394,10 +395,52 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         return None
 
     @staticmethod
+    def _sanitize_acronyms(text: str) -> str:
+        """Reemplaza siglas alfanuméricas y entre paréntesis por texto legible."""
+        import re as _re
+        # Patrón: letras seguidas de dígitos (case-insensitive), ej: ASTRAN25, astran25
+        def _replace_code(m):
+            word = m.group(0)
+            letters = ''.join(c for c in word if c.isalpha()).lower()
+            digits = ''.join(c for c in word if c.isdigit())
+            return f"{letters}" + (f" {digits}" if digits else "")
+        sanitized = _re.sub(r'[A-Za-z]{2,}\d+', _replace_code, text)
+        # Eliminar siglas entre paréntesis que son TODO MAYÚSCULAS (ej: (ISITRANS) → quitar)
+        # El nombre expandido ya está en el texto circundante
+        sanitized = _re.sub(r'\s*\([A-Z]{3,}\)\s*', ' ', sanitized)
+        # También reemplazar números por letras en contextos deportivos (3-2 → tres a dos)
+        sanitized = _re.sub(r'\b(\d+)\s*[-–]\s*(\d+)\b', lambda m: f'{m.group(1)} a {m.group(2)}', sanitized)
+        return sanitized
+
+    @staticmethod
+    def sanitize_content_for_llm(text: str) -> str:
+        """Pre-sanitizes article content BEFORE sending to LLM so acronyms don't leak."""
+        import re as _re
+        # Eliminar siglas alfanuméricas enteras (ej: ASTRAN25 → astran 25)
+        text = _re.sub(r'[A-Za-z]{2,}\d+', lambda m: ''.join(c.lower() for c in m.group(0) if c.isalpha()) + (' ' + ''.join(c for c in m.group(0) if c.isdigit()) if any(c.isdigit() for c in m.group(0)) else ''), text)
+        # Números con punto como miles: mantener tal cual (el LLM debería escribirlos en palabras)
+        # Pero eliminar códigos tipo AASTRAN o similares sin espacio
+        return text.strip()
+
+    @staticmethod
     def _truncate_to_sentence_limit(text: str, max_words: int) -> str:
         """Trunca texto respetando límites de palabras y cortes por frases completas."""
         words = text.split()
         if len(words) <= max_words:
+            # Asegurar mención de Saladillo Vivo si falta
+            if 'saladillo vivo' not in text.lower():
+                cierre = 'Toda la información en Saladillo Vivo.'
+                total = len(words) + len(cierre.split())
+                if total <= max_words:
+                    return f'{text.strip()} {cierre}'
+                else:
+                    # Reemplazar última oración
+                    last_dot = text.rfind('.')
+                    before = text[:last_dot + 1] if last_dot > 0 else ''
+                    after = text[last_dot + 1:].strip()
+                    candidate = f'{before} {cierre}'.strip()
+                    cw = candidate.split()
+                    return ' '.join(cw[:max_words]) + '.' if len(cw) > max_words else candidate
             return text
         # Cortar por oraciones completas dentro del límite
         truncated = ' '.join(words[:max_words])
@@ -488,6 +531,23 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         if alphanumeric_code:
             errors.append(f"'guion_ara' contiene sigla alfanumérica impronunciable: '{alphanumeric_code.group()}'")
 
+        # ---- 5. Guion DEBE mencionar 'Saladillo Vivo' ----
+        if guion:
+            guion_lower = guion.lower()
+            if 'saladillo vivo' not in guion_lower:
+                errors.append("'guion_ara' debe mencionar 'Saladillo Vivo' al menos una vez (invitación de cierre)")
+
+        # ---- 6. Ambiente sonoro: PROHIBIDO música/instrumental ----
+        ambiente = (meta.get('ambiente_sonoro') or '').lower()
+        MUSIC_MARKERS = ['música', 'musical', 'melodía', 'instrumental', 'cortina sonora']
+        for marker in MUSIC_MARKERS:
+            if marker in ambiente:
+                errors.append(
+                    f"'ambiente_sonoro' contiene término prohibido ('{marker}'). "
+                    "Solo se permite sonido ambiental callejero o silencio urbano mínimo."
+                )
+                break
+
         return len(errors) == 0, errors
 
     # ------------------------------------------------------------------
@@ -509,13 +569,13 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             all_errors.append("'contenido' es requerido y debe ser un objeto")
         else:
             guion = contenido.get('guion_ara', '')
-            words = guion.split() if guion else []
+            palabras = guion.split() if guion else []
             if not guion or len(guion) < 10:
                 all_errors.append("'guion_ara' vacío o demasiado corto")
-            elif len(words) > 25:
-                all_errors.append(f"'guion_ara' excede 25 palabras ({len(words)})")
-            elif len(words) < 15:
-                all_errors.append(f"'guion_ara' tiene solo {len(words)} palabras (ideal 18-22)")
+            elif len(palabras) > 25:
+                all_errors.append(f"'guion_ara' excede 25 palabras ({len(palabras)})")
+            elif len(palabras) < 15:
+                all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (ideal 18-22)")
 
             volanta = contenido.get('volanta_zocalo', '')
             if not volanta:
@@ -627,6 +687,19 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 guion = ' '.join(too_long_words[:24]) + '.'
         if not guion.endswith('.'):
             guion += '.'
+        # Asegurar que SIEMPRE se menciona Saladillo Vivo al cierre
+        if 'saladillo vivo' not in guion.lower():
+            cierre = 'Toda la información en Saladillo Vivo.'
+            current_words = guion.split()
+            # Dejar espacio para el cierre (restando palabras del final)
+            gap = len(cierre.split()) + 1
+            while len(current_words) + gap > 25 and len(current_words) > gap:
+                current_words.pop()
+            guion = ' '.join(current_words).rstrip()
+            if guion.endswith('.'):
+                guion += f' {cierre}'
+            else:
+                guion = f'{guion}. {cierre}'
 
         return {
             "version": "1.0",
@@ -671,7 +744,9 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         Retorna el dict Ara validado, o None si falló todo.
         """
         title_radial = article_data.get('titulo_radial') or article_data.get('title') or ''
-        content = article_data.get('contenido_ia') or article_data.get('text') or ''
+        content = self.sanitize_content_for_llm(
+            (article_data.get('contenido_ia') or article_data.get('text') or '')
+        )
         tono = article_data.get('tono') or 'NEUTRAL'
         art_id = article_data.get('id', '?')
 
@@ -722,6 +797,13 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             logger.warning("[AraScriptAgent] Ningún proveedor devolvió resultado, usando fallback heurístico")
             ara_result = self.apply_heuristic_fallback(title_radial, content, tono)
             used_provider = 'Fallback Heurístico'
+
+        # REVALIDAR después de cualquier fallback — fail-open si sigue fallando
+        if ara_result:
+            ok2, errs2 = self.validate_ara_json(ara_result)
+            if not ok2:
+                logger.error(f"[AraScriptAgent] Fallback también falló ({errs2}) — guardando NULL")
+                return None
 
         # Clamp duras post-validación (garantizar límites absolutos)
         if ara_result:

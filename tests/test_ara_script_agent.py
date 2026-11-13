@@ -49,7 +49,9 @@ class TestAraValidation(unittest.TestCase):
 
     def _make_valid_json(self, guion_words=20, tenor="informativo_servicio"):
         """Constructor helper para un JSON Ara válido."""
-        guion = " ".join([f"palabra{i}" for i in range(guion_words)]) + "."
+        # Incluir Saladillo Vivo en el guion para pasar validación
+        base = " ".join([f"palabra{i}" for i in range(guion_words - 3)])
+        guion = f"{base}. Toda la información en Saladillo Vivo."
         return {
             "version": "1.0",
             "contenido": {
@@ -133,6 +135,29 @@ class TestAraValidation(unittest.TestCase):
         ok, errs = self.agent.validate_ara_json("not a dict")
         self.assertFalse(ok)
         self.assertEqual(errs, ["El resultado no es un objeto JSON"])
+
+    def test_missing_saladillo_vivo_in_guion(self):
+        """Guion sin 'Saladillo Vivo' debe fallar."""
+        data = self._make_valid_json()
+        data["contenido"]["guion_ara"] = "Estudiantes ganó el torneo local esta noche."
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, f"Debería fallar; errors: {errs}")
+        self.assertTrue(any("Saladillo Vivo" in e for e in errs))
+
+    def test_ambiente_sonoro_con_musica_rechazado(self):
+        """ambiente_sonoro que menciona música debe ser rechazado."""
+        data = self._make_valid_json()
+        data["meta_ara"]["ambiente_sonoro"] = "Música instrumental muy baja de fondo"
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, f"Debería fallar; errors: {errs}")
+        self.assertTrue(any("música" in e or "musical" in e for e in errs))
+
+    def test_ambiente_sonoro_callejero_ok(self):
+        """ambiente_sonoro callejero pasa validación."""
+        data = self._make_valid_json()
+        data["meta_ara"]["ambiente_sonoro"] = "Ruido tenue de tráfico en la plaza central"
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertTrue(ok, f"Fallo inesperado: {errs}")
 
     def test_prohibited_words_blocked_when_not_allowed(self):
         """当 permitir_sonrisa=False, palabras como 'sonrisa' deben bloquearse."""
