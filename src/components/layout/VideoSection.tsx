@@ -422,7 +422,10 @@ const VideoSection: React.FC = () => {
       setIsIntroFadingOut(true);
     }
     // Sincronización 2s: Iniciar contenido oculto detrás de la intro (v25.1)
-    if (timeLeft <= 2 && !isContentPlaying && isPreRollOverlayActive) {
+    // IMPORTANTE: NO activar durante la fase post-noticia musical para evitar que
+    // el video de YouTube antiguo quede expuesto y dispare onEnded → handleOnEnded
+    // limpiando isPostNewsMusical antes de que finishIntro cargue el clip clips.
+    if (timeLeft <= 2 && !isContentPlaying && isPreRollOverlayActive && !isPostNewsMusical) {
       usePlayerStore.setState({ isContentPlaying: true });
     }
 
@@ -612,6 +615,7 @@ const VideoSection: React.FC = () => {
             {/* ELEMENTO AUDIO CENTRALIZADO TOP-LEVEL PARA NOTICIAS (GARANTIZA VOLUMEN AUDIBLE) */}
             <audio
               ref={audioRef}
+              data-slide-audio="true"
               className="opacity-0 pointer-events-none absolute"
               preload="auto"
               crossOrigin="anonymous"
@@ -628,15 +632,28 @@ const VideoSection: React.FC = () => {
                 const el = e.currentTarget;
                 if (el.duration && isFinite(el.duration) && el.duration > 0) {
                   setAudioDurationSec(el.duration);
-                  // Programa cierre del slide al terminar audio + 1s de cola.
-                  // Esto reemplaza el efecto anterior que causaba race condition.
+                  // Programa cierre del slide al terminar audio + 5s de cola.
+                  // Margen aumentado para asegurar que la frase promocional final
+                  // (últimos ~1-5s del audio) tenga tiempo suficiente para reproducirse completa.
                   // OnEnded es la vía primaria; este timeout es respaldo por si el
                   // evento no dispara (por ej. cortada de red, CORS parcial).
                   if (slideCloseTimerRef.current) clearTimeout(slideCloseTimerRef.current);
+                  const pad = 5;
                   slideCloseTimerRef.current = setTimeout(() => {
+                    // Guarda el estado actual para evaluar si realmente terminó
+                    const audioEl = document.querySelector('audio[data-slide-audio="true"]') as HTMLAudioElement | null;
+                    const dur = audioEl?.duration || el.duration || 0;
+                    const ct = audioEl?.currentTime || 0;
+                    console.log('[VideoSection] slideCloseTimer firing — audioDuration:', dur, 'currentTime:', ct.toFixed(2), 'diff:', (dur - ct).toFixed(2));
+                    if (dur > 0 && (dur - ct) > 1) {
+                      // Aún faltan >1s de audio; no cerrar, esperar al onEnded
+                      console.log('[VideoSection] slideCloseTimer skipped — audio aún reproduce');
+                      return;
+                    }
                     stopSlide();
                     resumeAfterSlide();
-                  }, (el.duration + 1) * 1000);
+                  }, (el.duration + pad) * 1000);
+                  console.log('[VideoSection] slideCloseTimer scheduled at', el.duration, '+', pad, '=', (el.duration + pad), 's');
                   try {
                     const iframe = document.querySelector('.video-universe iframe') as HTMLIFrameElement | null;
                     if (iframe && iframe.contentWindow) {

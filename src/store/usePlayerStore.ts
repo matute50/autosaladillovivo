@@ -260,6 +260,8 @@ export const usePlayerStore = create<PlayerState>()(
                 const restoredVolume = savedVolume > 0 ? savedVolume : 0.7;
                 set({ historyVolume: restoredVolume });
 
+                console.log('[usePlayerStore] handleOnEnded — isPostNewsMusical:', get().isPostNewsMusical, 'savedVideo:', get().savedVideo ? get().savedVideo.id : 'null');
+
                 // Post-news musical phase: resume the original paused video
                 if (get().isPostNewsMusical && get().savedVideo) {
                     const sv = get().savedVideo;
@@ -320,9 +322,11 @@ export const usePlayerStore = create<PlayerState>()(
 
             resumeAfterSlide: () => {
                 const { savedVideo, getRandomIntro } = get();
+                console.log('[usePlayerStore] resumeAfterSlide triggered — savedVideo:', savedVideo ? savedVideo.id : 'null');
                 // Post-news flow: save savedVideo for after the musical clip
                 if (savedVideo) {
                     const intro = getRandomIntro();
+                    console.log('[usePlayerStore] resumeAfterSlide → post-news musical phase, intro:', intro?.id);
                     set({
                         // Keep savedVideo intact; we'll restore it AFTER the musical ends
                         isPlaying: true,
@@ -333,6 +337,7 @@ export const usePlayerStore = create<PlayerState>()(
                         isPostNewsMusical: true        // signal that we're in the musical interlude phase
                     });
                 } else {
+                    console.log('[usePlayerStore] resumeAfterSlide → no savedVideo, play random sequence');
                     get().playRandomSequence();
                 }
             },
@@ -358,10 +363,13 @@ export const usePlayerStore = create<PlayerState>()(
 
             finishIntro: async () => {
                 const { isPostNewsMusical, savedVideo } = get();
+                console.log('[usePlayerStore] finishIntro called — isPostNewsMusical:', isPostNewsMusical, 'savedVideo:', savedVideo ? savedVideo.id : 'null');
 
                 if (isPostNewsMusical && savedVideo) {
                     // Post-news flow: load a random musical video from "clips" category with fade-in
+                    console.log('[usePlayerStore] finishIntro → fetching random musical video (category: clips)...');
                     const musical = await get().fetchRandomMusicalVideo();
+                    console.log('[usePlayerStore] finishIntro → musical fetched:', musical ? musical.id + ' (' + (musical.url || '').slice(0, 60) + ')' : 'null');
                     set({
                         currentVideo: musical,
                         isPreRollOverlayActive: false,
@@ -371,8 +379,27 @@ export const usePlayerStore = create<PlayerState>()(
                         isPostNewsFadeIn: true,  // trigger 0.3s video fade-in
                         isPostNewsMusical: !!musical  // keep flag while musical plays; cleared in handleOnEnded
                     });
+                    if (!musical) {
+                        // No clips disponibles: restaurar directamente el video guardado
+                        console.log('[usePlayerStore] finishIntro → no musical found, restoring savedVideo directly');
+                        const sv = savedVideo;
+                        const sp = get().savedProgress;
+                        set({
+                            currentVideo: { ...sv, startAt: sp } as any,
+                            savedVideo: null,
+                            savedProgress: 0,
+                            isPlaying: true,
+                            isContentPlaying: true,
+                            isPreRollOverlayActive: false,
+                            overlayIntroVideo: null,
+                            isPostNewsFadeIn: false,
+                            isPostNewsMusical: false,
+                            activeContentId: sv?.id ?? null
+                        });
+                    }
                 } else {
                     // Normal flow
+                    console.log('[usePlayerStore] finishIntro → normal flow (not post-news musical)');
                     set({
                         isPreRollOverlayActive: false,
                         overlayIntroVideo: null,
