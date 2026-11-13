@@ -38,6 +38,7 @@ from .article_ledger import (
 )
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
+from .ara_script_agent import AraScriptAgent
 from .audio_generator_agent import AudioGeneratorAgent
 from .slide_generator_agent import SlideGeneratorAgent
 from .publisher_agent import PublisherAgent
@@ -120,12 +121,13 @@ class OrchestratorAgent:
 
     def run_full_pipeline(self):
         """
-        Ejecuta el ciclo integral de 6 pasos:
+        Ejecuta el ciclo integral de 8 pasos:
         1. Scraping (ScraperAgent)
         2. Guardar en Base de Datos como Borrador (StorageAgent)
         3. Modificar Título y Texto con IA (AiRewriterAgent)
+        3.5. Generar guiones estilo Ara (AraScriptAgent) — JSON jsonb en ara_json
         4. Generar y optimizar audio locutado (AudioGeneratorAgent)
-        5. Guardar en Base de Datos con IA y Audio (StorageAgent)
+        5. Guardar en Base de Datos con IA, Audio y Slides (StorageAgent)
         6. Publicar Oficialmente en Base de Datos (PublisherAgent)
         """
         start_time = datetime.now()
@@ -277,6 +279,34 @@ class OrchestratorAgent:
                 if qa_res.severity in ('error', 'warning'):
                     issues_str = '; '.join(f"{i['field']}:{i['message']}" for i in qa_res.issues)
                     logger.warning(f"  [QA-Paso3] {art.get('titulo_ia','?')[:40]}... → {issues_str}")
+
+        # ----------------------------------------------------------------------
+        # PASO 3.5: GENERAR JSON ESTILO ARA
+        # ----------------------------------------------------------------------
+        ara_agent = AraScriptAgent()
+        ara_generated = 0
+        ara_failed = 0
+        logger.info("🎬 [PASO 3.5/6] AraScriptAgent: generando guiones estilo Ara para cada noticia...")
+        for art in modified_list:
+            art_id = art.get('id')
+            # Solo generar si no tiene ara_json aún
+            has_ara = art.get('ara_json') or False
+            if has_ara:
+                continue  # Ya tiene Ara, saltar
+            ara_data = ara_agent.generate_ara_json(art)
+            if ara_data:
+                art['ara_json'] = ara_data
+                ara_generated += 1
+                # Guardar en BD inmediatamente para no perder el dato
+                upd = self.storage_agent.update_ara_json(art_id, ara_data)
+                if not upd:
+                    logger.warning(f"  [AraScriptAgent] No se pudo guardar ara_json ID={art_id} (columna ausente?)")
+                    ara_failed += 1
+            else:
+                logger.warning(f"  [AraScriptAgent] Falló generación Ara para '{art.get('title','?')[:40]}...'")
+                ara_failed += 1
+            time.sleep(0.8)
+        logger.info(f"✅ [PASO 3.5/6] Guiones Ara generados: {ara_generated} exitosos, {ara_failed} fallidos sobre {len(modified_list)}.")
 
         # ----------------------------------------------------------------------
         # PASO 4: GENERACIÓN Y OPTIMIZACIÓN DE AUDIO

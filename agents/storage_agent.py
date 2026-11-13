@@ -335,6 +335,75 @@ class StorageAgent:
             print(f"  [StorageAgent] Error buscando artículos recientes: {e}")
             return []
 
+    def update_ara_json(self, article_id, ara_data):
+        """
+        Guarda un dict Ara en la columna ara_json (jsonb) de la tabla articles
+        y marca enviado_a_ara = True para el artículo indicado.
+
+        Retorna el registro actualizado si la operación fue exitosa, sino None.
+        """
+        if not article_id or not ara_data or not isinstance(ara_data, dict):
+            print(f"  [StorageAgent] Error: se requiere article_id y ara_data válido.")
+            return None
+
+        now_iso = datetime.now().isoformat()
+        payload = {
+            'ara_json': json.dumps(ara_data, ensure_ascii=False),
+            'enviado_a_ara': True,
+            'updatedAt': now_iso,
+        }
+
+        headers = self.get_headers(return_representation=True)
+
+        for attempt in range(5):
+            resp = requests.patch(
+                self.base_rest_url,
+                params={'id': f'eq.{article_id}'},
+                headers=headers,
+                json=payload,
+                timeout=25
+            )
+            if resp.status_code in (200, 204):
+                print(f"  [StorageAgent] [AraGuardado] ID: {article_id} | enviado_a_ara=true")
+                try:
+                    res_json = resp.json()
+                    return res_json[0] if (isinstance(res_json, list) and len(res_json) > 0) else payload
+                except Exception:
+                    return payload
+            elif resp.status_code == 400 and 'in the schema cache' in resp.text:
+                # La columna ara_json aún no existe en la BD — error irreversible hasta que se corra el ALTER TABLE
+                m = re.search(r"(?:column|columna) '(\w+)'", resp.text)
+                if m and m.group(1) == 'ara_json':
+                    print(f"  [StorageAgent] ¡COLUMN 'ara_json' NO EXISTE EN LA BD! "
+                          f"Ejecuta el ALTER TABLE antes de continuar.\n  {resp.text[:300]}")
+                return None
+            print(f"  [StorageAgent] Error al guardar ara_json ({resp.status_code}): {resp.text[:200]}")
+            break
+
+        return None
+
+    def find_pending_ara_articles(self, limit=20):
+        """Busca artículos que aún no tienen ara_json generado (para procesamiento retroactivo)."""
+        try:
+            resp = requests.get(
+                self.base_rest_url,
+                params={
+                    'select': 'id,title,text,titulo_radial,contenido_ia,tono,status,is_published',
+                    'status': 'neq.draft',
+                    'enviado_a_ara': 'eq.false',
+                    'order': 'created_at.desc',
+                    'limit': limit,
+                },
+                headers=self.get_headers(False),
+                timeout=20
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return []
+        except Exception as e:
+            print(f"  [StorageAgent] Error buscando artículos pendientes Ara: {e}")
+            return []
+
     def find_pending_ai_articles(self, limit=20):
         """Busca artículos en la base de datos que estén en estado 'draft' y no procesados por IA."""
         try:
