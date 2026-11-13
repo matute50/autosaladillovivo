@@ -496,7 +496,7 @@ const VideoSection: React.FC = () => {
                   <iframe
                     srcDoc={slideHtmlContent || undefined}
                     src={slideHtmlContent ? undefined : rawUrl}
-                    className="w-full h-full border-none pointer-events-auto video-universe"
+                    className="w-full h-full border-none pointer-events-auto"
                     title={typeof currentSlide === 'object' ? currentSlide?.title || currentVideo?.nombre || "Slide Noticia" : "Slide Noticia"}
                     sandbox="allow-same-origin allow-scripts allow-forms"
                     allow="autoplay; fullscreen"
