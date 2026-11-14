@@ -230,12 +230,15 @@ __CONTENT__
 
 TONO GENERAL DE LA NOTICIA: __TENOR__
 
-Debes generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
+DEBES generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
 
 {
   "version": "1.0",
   "contenido": {
-    "guion_ara": "__EXAMPLE_GUION__",
+    "guion_ara": "__EJEMPLO_COMPLETO__: El papa León XIV presidió este jueves una vigilia multitudinaria en Lima. Toda la información en Saladillo Vivo.",
+    "seccion_a_guion": "__PRIMERA Mitad__ (~15-18 palabras, presenta el tema y datos principales, termina con oración completa)",
+    "seccion_b_guion": "__SEGUNDA Mitad__ (~15-18 palabras, continuación natural, SIEMPRE cierra con invitación a Saladillo Vivo)",
+    "corte_en_palabra": "__ÚLTIMA PALABRA de sección A sin puntuación__",
     "volanta_zocalo": "__EXAMPLE_VOLANTA__",
     "titulo_zocalo": "__EXAMPLE_TITULO__"
   },
@@ -265,6 +268,18 @@ GUION_ARA:
 - Debe contener: titular directo + dato concreto + invitación breve a entrar a Saladillo Vivo acorde al tenor.
 - PROHIBIDO usar siglas alfanuméricas impronunciables como códigos (ej. evita "ASTRAN25"); escribe los números con letras (ej. "tres a dos" en lugar de "3-2").
 - Ejemplo correcto (22 palabras): "Una jornada que dejó saldo positivo en el deporte local. El equipo de Saladillo se impuso tres a uno y ahora lidera el torneo regional con cinco puntos de ventaja."
+
+SECCION_A_GUION:
+- Primera mitad del guión, 15-18 palabras. Presenta el tema principal y datos clave de la noticia. DEBE terminar con oración completa (punto final).
+- Contiene la información esencial para enganchar al espectador en los primeros segundos.
+
+SECCION_B_GUION:
+- Segunda mitad del guión, 15-18 palabras. Continuación natural desde el corte de sección A. SIEMPRE debe cerrar con una invitación breve que mencione «Saladillo Vivo» acorde al tenor: cálida en alegre/informativo; sobria en policial/luto.
+- Si el cierre original no menciona Saladillo Vivo, reemplazar la última oración por una invitación adecuada.
+
+CORTE_EN_PALABRA:
+- Última palabra de SECCION_A_GUION sin puntuación ni comillas. Sirve para identificar dónde cortar visualmente entre clips.
+
 
 VOLANTA_ZOCALO:
 - Máximo 3 palabras. Sustantivo o verbo en infinitivo con sentido completo. Ej: "VIDA ÚTIL", "DEPORTES", "OBRAS".
@@ -570,12 +585,22 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         else:
             guion = contenido.get('guion_ara', '')
             palabras = guion.split() if guion else []
-            if not guion or len(guion) < 10:
-                all_errors.append("'guion_ara' vacío o demasiado corto")
-            elif len(palabras) > 25:
-                all_errors.append(f"'guion_ara' excede 25 palabras ({len(palabras)})")
-            elif len(palabras) < 15:
-                all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (ideal 18-22)")
+            # Si tiene campos de doble clip, exigir rangos nuevos; sino legacy
+            tiene_split = bool(contenido.get('seccion_a_guion'))
+            if tiene_split:
+                if not guion or len(guion) < 20:
+                    all_errors.append("'guion_ara' vacío o demasiado corto (mín 20 palabras para doble clip)")
+                elif len(palabras) > 45:
+                    all_errors.append(f"'guion_ara' excede 45 palabras ({len(palabras)})")
+                elif len(palabras) < 22:
+                    all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (mínimo 22 para dos clips)")
+            else:
+                if not guion or len(guion) < 10:
+                    all_errors.append("'guion_ara' vacío o demasiado corto")
+                elif len(palabras) > 25:
+                    all_errors.append(f"'guion_ara' excede 25 palabras ({len(palabras)})")
+                elif len(palabras) < 15:
+                    all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (ideal 18-22)")
 
             volanta = contenido.get('volanta_zocalo', '')
             if not volanta:
@@ -588,6 +613,29 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 all_errors.append("'titulo_zocalo' vacío")
             elif len(titulo_z.split()) > 8:
                 all_errors.append(f"'titulo_zocalo' excede 8 palabras ({len(titulo_z.split())})")
+
+            # --- Nuevos campos para doble clip (tolerantes: no error si faltan) ---
+            seccion_a = contenido.get('seccion_a_guion', '')
+            if seccion_a:
+                a_words = seccion_a.split()
+                if len(a_words) < 10 or len(a_words) > 25:
+                    all_errors.append(f"'seccion_a_guion' tiene {len(a_words)} palabras (ideal 14-18)")
+                if seccion_a.strip() and not any(seccion_a.rstrip().endswith(c) for c in '.!¿?'):
+                    all_errors.append("'seccion_a_guion' no termina con puntuación final")
+
+            seccion_b = contenido.get('seccion_b_guion', '')
+            if seccion_b:
+                b_words = seccion_b.split()
+                if len(b_words) < 10 or len(b_words) > 25:
+                    all_errors.append(f"'seccion_b_guion' tiene {len(b_words)} palabras (ideal 14-18)")
+                if 'saladillo vivo' not in seccion_b.lower():
+                    all_errors.append("'seccion_b_guion' debe mencionar 'Saladillo Vivo' al cerrar")
+                if seccion_b.strip() and not any(seccion_b.rstrip().endswith(c) for c in '.!¿?'):
+                    all_errors.append("'seccion_b_guion' no termina con puntuación final")
+
+            corte = contenido.get('corte_en_palabra', '')
+            if corte and corte != corte.strip():
+                all_errors.append("'corte_en_palabra' no debe tener espacios extras")
 
         meta = data.get('meta_ara')
         if not isinstance(meta, dict):
@@ -661,50 +709,88 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         titulo_words = first_sentence.split()[:8]
         titulo_z = ' '.join(titulo_words) if titulo_words else title[:40]
 
-        # Guion heurístico: condensar contenido a ~20 palabras mínimo 18
+        # Guion heurístico: condensar contenido a ~35 palabras para dos clips
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', content) if s.strip()]
         acc = []
         wc = 0
         for s in sentences:
             parts = s.split()
-            # Acortar cada oración si excede para llegar a 18-22 palabras
-            if wc + len(parts) > 22:
-                extra = 22 - wc
+            # Acortar cada oración si excede el objetivo (~35 palabras total)
+            if wc + len(parts) > 36:
+                extra = 36 - wc
                 if extra >= 3:
                     acc.append(' '.join(parts[:extra]))
                 break
             acc.append(s)
             wc += len(parts)
-        guion = ' '.join(acc).strip()
-        if not guion.endswith('.'):
-            guion += '.'
-        # Si aún está corto (<18), repetir idea clave del título
-        while len(guion.split()) < 18 and title:
-            guion += f' {title}.'
-            # Recortar si pasamos de 25
-            too_long_words = guion.split()
-            if len(too_long_words) > 25:
-                guion = ' '.join(too_long_words[:24]) + '.'
-        if not guion.endswith('.'):
-            guion += '.'
+        full_text = ' '.join(acc).strip()
+        if not full_text.endswith('.'):
+            full_text += '.'
+        # Si aún está corto (<30), repetir idea clave del título
+        while len(full_text.split()) < 30 and title:
+            full_text += f' {title}.'
+            too_long = full_text.split()
+            if len(too_long) > 40:
+                full_text = ' '.join(too_long[:39]) + '.'
+        if not full_text.endswith('.'):
+            full_text += '.'
+
         # Asegurar que SIEMPRE se menciona Saladillo Vivo al cierre
-        if 'saladillo vivo' not in guion.lower():
+        if 'saladillo vivo' not in full_text.lower():
             cierre = 'Toda la información en Saladillo Vivo.'
-            current_words = guion.split()
-            # Dejar espacio para el cierre (restando palabras del final)
+            current_words = full_text.split()
             gap = len(cierre.split()) + 1
-            while len(current_words) + gap > 25 and len(current_words) > gap:
+            while len(current_words) + gap > 36 and len(current_words) > gap:
                 current_words.pop()
-            guion = ' '.join(current_words).rstrip()
-            if guion.endswith('.'):
-                guion += f' {cierre}'
+            full_text = ' '.join(current_words).rstrip()
+            if full_text.endswith('.'):
+                full_text += f' {cierre}'
             else:
-                guion = f'{guion}. {cierre}'
+                full_text = f'{full_text}. {cierre}'
+
+        # Dividir en dos secciones equilibradas (~mitad + mitad, cortando en último punto antes del 50%)
+        all_words = full_text.split()
+        n = len(all_words)
+        target_a = max(14, min(n // 2, 22))
+        # Buscar mejor punto de corte: última oración completa <= target_a + 4
+        cut_idx = -1
+        search_limit = min(n - 10, target_a + 4)
+        for i in range(target_a, search_limit + 1):
+            candidate = ' '.join(all_words[:i+1])
+            if candidate.rstrip().endswith('.'):
+                cut_idx = i
+                break
+        # Si no encontró, buscar hacia atrás desde target_a
+        if cut_idx == -1:
+            for i in range(target_a - 1, 10, -1):
+                candidate = ' '.join(all_words[:i])
+                if candidate.rstrip().endswith('.'):
+                    cut_idx = i - 1
+                    break
+        # Fallback: si nada funcionó, cortar en target_a sin importar puntuación
+        if cut_idx == -1:
+            cut_idx = target_a
+
+        sec_a_text = ' '.join(all_words[:cut_idx+1]).rstrip()
+        if not sec_a_text.endswith('.'):
+            sec_a_text += '.'
+        sec_b_text = ' '.join(all_words[cut_idx+1:]).rstrip()
+        if not sec_b_text.endswith('.'):
+            sec_b_text += '.'
+        # Asegurar que sección B siempre cierre con Saladillo Vivo
+        if 'saladillo vivo' not in sec_b_text.lower():
+            sec_b_text = sec_b_text.rstrip('.') + '. Toda la información en Saladillo Vivo.'
+        corte_word = all_words[cut_idx].rstrip('.,;:')
+
+        guion = full_text
 
         return {
             "version": "1.0",
             "contenido": {
                 "guion_ara": guion,
+                "seccion_a_guion": sec_a_text,
+                "seccion_b_guion": sec_b_text,
+                "corte_en_palabra": corte_word,
                 "volanta_zocalo": volanta,
                 "titulo_zocalo": titulo_z,
             },
@@ -809,7 +895,9 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         if ara_result:
             contenido = ara_result.setdefault('contenido', {})
             guion = contenido.get('guion_ara', '')
-            if len(guion.split()) > 25:
+            # Clamp solo si excede; NO forzar corta si es un split validado
+            tiene_split_clamp = bool(contenido.get('seccion_a_guion'))
+            if not tiene_split_clamp and len(guion.split()) > 25:
                 guion = ' '.join(guion.split()[:25]) + '.'
                 contenido['guion_ara'] = guion
 
@@ -828,6 +916,17 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 meta['lenguaje_corporal'] = 'postura_firme_contenida'
             if meta.get('ritmo_camara') not in RITMO_CAMARA_VALUES:
                 meta['ritmo_camara'] = 'plano_fijo_estable'
+
+            # Clamp nuevos campos de split (tolerante)
+            sec_a = contenido.get('seccion_a_guion', '')
+            if sec_a and len(sec_a.split()) > 25:
+                contenido['seccion_a_guion'] = ' '.join(sec_a.split()[:24]) + '.'
+            sec_b = contenido.get('seccion_b_guion', '')
+            if sec_b and len(sec_b.split()) > 25:
+                contenido['seccion_b_guion'] = ' '.join(sec_b.split()[:24]) + '.'
+            corte = contenido.get('corte_en_palabra', '')
+            if corte and len(corte.split()) > 3:
+                contenido['corte_en_palabra'] = corte.split()[0]
 
             ara_result['generated_at'] = datetime.now().isoformat()
             ara_result['provider_used'] = used_provider
