@@ -1,5 +1,5 @@
 -- ============================================================
--- VIDEO FACTORY SCHEMA — Saladillo Vivo Pro
+-- VIDEO FACTORY SCHEMA - Saladillo Vivo Pro
 -- Fase 1: Base de datos para el panel web /studio-fabrica
 -- Ejecutar en Supabase SQL Editor
 -- ============================================================
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.video_presenters (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE public.video_presenters IS 'Perfiles de presentadores de la fábrica de video';
+COMMENT ON TABLE public.video_presenters IS 'Perfiles de presentadores de la fabrica de video';
 
 -- ============================================================
 -- 2. video_locations
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS public.video_locations (
   tipo text NOT NULL CHECK (tipo IN ('foto_diurna', 'foto_nocturna', 'video_fondo', 'estudio_chroma')),
   storage_path text,
   public_url text,
-  descripcion_ambiente_sonoro text,   -- sin música
+  descripcion_ambiente_sonoro text,   -- sin musica
   activa boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS public.video_weather_rules (
   override_luto_oscuro boolean NOT NULL DEFAULT false
 );
 
-COMMENT ON TABLE public.video_weather_rules IS 'Reglas automáticas de vestuario/luz según clima/horario en Saladillo';
+COMMENT ON TABLE public.video_weather_rules IS 'Reglas automaticas de vestuario/luz segun clima/horario en Saladillo';
 
 -- ============================================================
 -- 4. video_factory_settings
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS public.video_factory_settings (
 ALTER TABLE public.video_factory_settings
   ADD CONSTRAINT video_factory_settings_single_row CHECK (id = (SELECT id FROM public.video_factory_settings LIMIT 1));
 
-COMMENT ON TABLE public.video_factory_settings IS 'Configuración global del piloto automático de la fábrica';
+COMMENT ON TABLE public.video_factory_settings IS 'Configuracion global del piloto automatico de la fabrica';
 
 -- ============================================================
 -- 5. Extender ara_video_jobs con columnas de fábrica
@@ -113,7 +113,7 @@ ALTER TABLE IF EXISTS public.ara_video_jobs
   ADD COLUMN IF NOT EXISTS creditos_estimados integer;
 
 COMMENT ON COLUMN public.ara_video_jobs.presenter_id IS 'Presentador asignado a este job';
-COMMENT ON COLUMN public.ara_video_jobs.location_id IS 'Locación de fondo seleccionada';
+COMMENT ON COLUMN public.ara_video_jobs.location_id IS 'Locacion de fondo seleccionada';
 COMMENT ON COLUMN public.ara_video_jobs.clima_snapshot_json IS 'Foto congelada de temperatura/hora/cielo de Saladillo';
 COMMENT ON COLUMN public.ara_video_jobs.bloques_override_json IS 'Overrides por bloque de texto de 8s';
 
