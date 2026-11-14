@@ -13,6 +13,12 @@ export function middleware(request: NextRequest) {
   // Detección de Móvil (Sin incluir tablets para mantener experiencia Desktop en ellas si se prefiere, o incluirlo si es necesario)
   const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent) && !isTV
 
+  // Excluir el panel de fábrica del redireccionamiento móvil
+  const isStudioFabrica = url.pathname.startsWith('/studio-fabrica')
+  if (isStudioFabrica) {
+    return NextResponse.next()
+  }
+
   // --- LÓGICA DE REDIRECCIÓN ---
 
   // 1. Si es TV
