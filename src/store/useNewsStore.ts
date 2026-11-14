@@ -157,7 +157,7 @@ export const useNewsStore = create<NewsState>((set, get) => ({
 
         set({
             allNews,
-            featuredNews: allNews.filter((n: any) => n.featureStatus === 'featured'),
+            featuredNews: data.featuredNews || allNews[0] || null,
             secondaryNews: allNews.filter((n: any) => n.featureStatus === 'secondary'),
             tertiaryNews: allNews.filter((n: any) => n.featureStatus === 'tertiary'),
             otherNews: allNews.filter((n: any) => !['featured', 'secondary', 'tertiary'].includes(n.featureStatus || '')),

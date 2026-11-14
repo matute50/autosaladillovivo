@@ -82,16 +82,11 @@ export async function getArticlesForHome(limitTotal: number = 25) {
 
     let featuredNews: Article | null = null;
 
-    // Asegurar que solo haya una noticia destacada
-    if (featuredCandidates.length > 0) {
-      // Ya vienen ordenadas por created_at.desc, así que la primera es la más nueva.
-      featuredNews = featuredCandidates.shift()!;
-      // Las demás 'featured' se convierten en 'secondary'
-      secondaryNews.unshift(...featuredCandidates);
-    } else if (processedNews.length > 0) {
-      // Si no hay 'featured', la última generada (más reciente) es la destacada
-      // processedNews ya viene ordenado por created_at DESC desde Supabase
+    // La noticia destacada siempre es la última publicada (más reciente por created_at).
+    // Ya viene ordenada por created_at.desc desde Supabase, así que index [0] es la más nueva.
+    if (processedNews.length > 0) {
       featuredNews = processedNews[0];
+      // El resto se distribuye por featureStatus en las listas secundarias (sin incluir el destacado).
     }
 
     secondaryNews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -417,7 +412,7 @@ export async function getCalendarEvents(): Promise<CalendarEvent[]> {
 export async function getArticles() {
   const { allNews } = await getArticlesForHome(100);
 
-  const destacada = allNews.find(a => a.featureStatus === 'featured') || null;
+  const destacada = allNews.length > 0 ? allNews[0] : null;
   const noticias2 = allNews.filter(a => a.featureStatus === 'secondary');
   const noticias3 = allNews.filter(a => a.featureStatus === 'tertiary');
   const otrasNoticias = allNews.filter(a => !a.featureStatus);
