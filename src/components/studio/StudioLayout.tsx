@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { signOut } from '@/app/studio-fabrica/login/actions'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/supabase/client'
@@ -9,16 +9,19 @@ import { Video, Users, Cloud, MonitorPlay, LogOut } from 'lucide-react'
 
 type TabId = 'piloto' | 'presentadores' | 'clima' | 'inspector'
 
+const tabs: { id: TabId; label: string; icon: React.ReactNode; href: string }[] = [
+  { id: 'piloto', label: 'Piloto Automático', icon: <MonitorPlay className="w-4 h-4" />, href: '/studio-fabrica/piloto' },
+  { id: 'presentadores', label: 'Presentadores', icon: <Users className="w-4 h-4" />, href: '/studio-fabrica/presentadores' },
+  { id: 'clima', label: 'Clima', icon: <Cloud className="w-4 h-4" />, href: '/studio-fabrica/clima' },
+  { id: 'inspector', label: 'Inspector', icon: <Video className="w-4 h-4" />, href: '/studio-fabrica/inspector' },
+]
+
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
-  const [activeTab, setActiveTab] = useState<TabId>('piloto')
+  const pathname = usePathname()
   const { session, loading } = useAuth()
 
-  const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-    { id: 'piloto', label: 'Piloto Automático', icon: <MonitorPlay className="w-4 h-4" /> },
-    { id: 'presentadores', label: 'Presentadores', icon: <Users className="w-4 h-4" /> },
-    { id: 'clima', label: 'Clima', icon: <Cloud className="w-4 h-4" /> },
-    { id: 'inspector', label: 'Inspector', icon: <Video className="w-4 h-4" /> },
-  ]
+  // Derivar tab activo de la URL actual
+  const activeTab: TabId = tabs.find(t => pathname.startsWith(t.href))?.id ?? 'piloto'
 
   return (
     <div className="min-h-screen bg-background">
@@ -46,14 +49,14 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
         </div>
       </header>
 
-      {/* Tab Navigation */}
+      {/* Tab Navigation - Links reales que navegan */}
       <nav className="border-b bg-muted/30 overflow-x-auto">
         <div className="max-w-screen-2xl mx-auto px-4">
           <div className="flex gap-1 min-w-max">
             {tabs.map((tab) => (
-              <button
+              <Link
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                href={tab.href}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-primary text-primary'
@@ -62,7 +65,7 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
               >
                 {tab.icon}
                 {tab.label}
-              </button>
+              </Link>
             ))}
           </div>
         </div>
@@ -75,14 +78,9 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         ) : (
-          <TabContent activeTab={activeTab}>{children}</TabContent>
+          children
         )}
       </main>
     </div>
   )
-}
-
-// Re-export children through this wrapper to inject layout logic
-function TabContent({ activeTab, children }: { activeTab: TabId; children: React.ReactNode }) {
-  return children
 }

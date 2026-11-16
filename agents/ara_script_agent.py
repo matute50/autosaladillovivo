@@ -220,7 +220,7 @@ class AraScriptAgent:
         # Determinar permitir_sonrisa a partir del tenor
         sonriente = tenor in ('alegre_cultural', 'informativo_servicio')
 
-        TEMPLATE = """Eres el director creativo de "Ara", espacio periodístico televisivo femenino profesional de Saladillo Vivo. Transforma esta noticia local en un guión ESTRUCTURADO para presentación televisiva.
+        TEMPLATE = """Eres el director creativo de "Ara", espacio periodístico televisivo femenino profesional de Saladillo Vivo. Transforma esta noticia local en un guión ESTRUCTURADO para presentación televisiva multi-clip (Veo 3.1).
 
 NOTICIA — TÍTULO RADIAL:
 __TITLE_RADIAL__
@@ -230,15 +230,22 @@ __CONTENT__
 
 TONO GENERAL DE LA NOTICIA: __TENOR__
 
-DEBES generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
+DEBES generar UN SOLO OBJETO JSON VÁLIDO con ESTA estructura EXACTA (versión 1.1):
 
 {
-  "version": "1.0",
+  "version": "1.1",
   "contenido": {
-    "guion_ara": "__EJEMPLO_COMPLETO__: El papa León XIV presidió este jueves una vigilia multitudinaria en Lima. Toda la información en Saladillo Vivo.",
-    "seccion_a_guion": "__PRIMERA Mitad__ (~15-18 palabras, presenta el tema y datos principales, termina con oración completa)",
-    "seccion_b_guion": "__SEGUNDA Mitad__ (~15-18 palabras, continuación natural, SIEMPRE cierra con invitación a Saladillo Vivo)",
-    "corte_en_palabra": "__ÚLTIMA PALABRA de sección A sin puntuación__",
+    "guion_ara": "__GUION_COMPLETO_CONCATENADO__ (todas las palabras del guión unidas, máximo 45 palabras)",
+    "bloques": [
+      {
+        "orden": 1,
+        "guion_ara": "__PRIMER_BLOQUE__: gancho + hecho principal (16-22 palabras exactas, oración completa, cierra con punto)"
+      },
+      {
+        "orden": 2,
+        "guion_ara": "__SEGUNDO_BLOQUE__: dato clave o desarrollo (16-22 palabras exactas, oración completa)"
+      }
+    ],
     "volanta_zocalo": "__EXAMPLE_VOLANTA__",
     "titulo_zocalo": "__EXAMPLE_TITULO__"
   },
@@ -252,70 +259,47 @@ DEBES generar UN SOLO OBJETO JSON VÁLIDO con esta estructura EXACTA:
     "lenguaje_corporal": "__EXAMPLE_LENG_CORP__",
     "ambiente_sonoro": "__EXAMPLE_AMBIENTE__",
     "ritmo_camara": "__EXAMPLE_RITMO__",
-    "requiere_aprobacion_sensible": __REQUIERE__
+    "requiere_aprobacion_sensible": __REQUIERE__,
+    "continuidad_visual": "__DESCRIPTION_FIJA: vestimenta exacta, rasgos faciales, peinado, iluminación natural diurna, locación: centro urbano de Saladillo (calle principal/plaza), debe repetirse idéntica en todos los clips__"
   }
 }
 
 REGLAS ESTRICTAS PARA CADA CAMPO:
 
 GUION_ARA:
-- Es el texto que ARA dice ON-CAMERA, NO es el artículo completo.
-- Extensión MÁXIMA ABSOLUTA: exactamente 20 palabras (rango aceptable 18 a 22). Si el borrador tiene más de 22, reducilo SIN cortar oraciones hasta llegar a 20. Contá las palabras antes de enviar.
-- NUNCA cortes la última palabra ni dejes una oración incompleta (prohibido terminar con "…para el." o similares). La última oración debe cerrar con punto final y sentido completo.
-- La última oración SIEMPRE debe ser una invitación breve que mencione «Saladillo Vivo» acorde al tenor: cálida ("Mirá toda la información en Saladillo Vivo") en alegre/informativo; sobria y respetuosa ("Toda la información, en Saladillo Vivo.") en policial/luto.
+- Es el texto completo concatenado de todos los bloques. Máximo 45 palabras totales.
+- La última oración SIEMPRE debe ser una invitación breve que mencione «Saladillo Vivo» acorde al tenor.
 - En español argentino rioplatense, estilo directo, cercano y profesional.
-- No incluir título ni repetición de palabras del gancho.
-- Debe contener: titular directo + dato concreto + invitación breve a entrar a Saladillo Vivo acorde al tenor.
-- PROHIBIDO usar siglas alfanuméricas impronunciables como códigos (ej. evita "ASTRAN25"); escribe los números con letras (ej. "tres a dos" en lugar de "3-2").
-- Ejemplo correcto (22 palabras): "Una jornada que dejó saldo positivo en el deporte local. El equipo de Saladillo se impuso tres a uno y ahora lidera el torneo regional con cinco puntos de ventaja."
+- Prohibido terminar oraciones truncadas ("…para el." es inválido).
 
-SECCION_A_GUION:
-- Primera mitad del guión, 15-18 palabras. Presenta el tema principal y datos clave de la noticia. DEBE terminar con oración completa (punto final).
-- Contiene la información esencial para enganchar al espectador en los primeros segundos.
-
-SECCION_B_GUION:
-- Segunda mitad del guión, 15-18 palabras. Continuación natural desde el corte de sección A. SIEMPRE debe cerrar con una invitación breve que mencione «Saladillo Vivo» acorde al tenor: cálida en alegre/informativo; sobria en policial/luto.
-- Si el cierre original no menciona Saladillo Vivo, reemplazar la última oración por una invitación adecuada.
-
-CORTE_EN_PALABRA:
-- Última palabra de SECCION_A_GUION sin puntuación ni comillas. Sirve para identificar dónde cortar visualmente entre clips.
-
+BLOQUES:
+- Cada bloque representa 1 clip de video de ~8 segundos.
+- Mínimo 2 bloques, máximo 3 según la densidad de la noticia.
+- Cada bloque: 16 a 22 palabras EXACTAS (oraciones completas, sin truncamientos, números en palabras).
+- BLOQUE 1: Gancho + hecho principal de la noticia. Cierra con oración completa.
+- BLOQUES INTERMEDIOS (si hay 3+): Dato clave / desarrollo / contexto local.
+- ÚLTIMO BLOQUE: Cierre + invitación breve a entrar a Saladillo Vivo acorde al tenor.
+- El último bloque SIEMPRE debe mencionar «Saladillo Vivo».
 
 VOLANTA_ZOCALO:
-- Máximo 3 palabras. Sustantivo o verbo en infinitivo con sentido completo. Ej: "VIDA ÚTIL", "DEPORTES", "OBRAS".
+- Máximo 3 palabras. Sustantivo o verbo en infinitivo con sentido completo.
 
 TITULO_ZOCALO:
-- Hasta 7 u 8 palabras. Frase declarativa completa, nunca truncada por cantidad de caracteres. Ej: "Nuevo horario para el transporte municipal".
+- Hasta 7 u 8 palabras. Frase declarativa completa, nunca truncada.
 
-TONO_VOCAL (meta_ara):
-- Siempre describe voz FEMENINA joven, clara, cálido/expresiva cuando se permite sonrisa, sobria/serena cuando no.
-- Incluir siempre "español argentino rioplatense".
-- Ejemplo alegre: "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
-- Ejemplo sobrio: "Femenina joven, tono sereno y sobrio, español argentino rioplatense"
+CONTINUIDAD_VISUAL (meta_ara):
+- Descripción Fija del personaje y escena que DEBE REPETIRSE IDÉNTICA en todos los clips.
+- Incluir: vestimenta exacta (colores, tipo de prenda), rasgos faciales, peinado, maquillaje sutil.
+- Incluir: iluminación natural diurna, posición de la luz.
+- Incluir: locación específica en el centro de Saladillo (calle, plaza, edificio recognizable).
+- Ejemplo: "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino sobre blusa blanca, maquillaje natural, iluminación natural frontal desde la izquierda, locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo."
 
-EXPRESION_INICIO:
-- DESCRIPCIÓN PURAMENTE VISUAL del gesto facial/mirada. PROHIBIDO incluir cualquier palabra hablada, diálogo,引述 o expresión entre comillas/negrita.
-- Mal ejemplo (incorrecto): "Saluda mientras dice «Buenas»" ← NUNCA poner esto.
-- Bien ejemplo (correcto): "Mirá fija al lente con leve asentimiento inicial, tono cálido pero contenido"
-- La locución va exclusiva en guion_ara; este campo solo describe GESTOS Y MIRADAS.
-
-EXPRESION_DESARROLLO / EXPRESION_CIERRE:
-- Descripciones en tercera persona, estilo director de casting. Sin diálogos spoken.
-
-LENGUAJE_CORPORAL:
-- Uno de: manos_sueltas_natural | postura_firme_contenida | quietud_respetuosa
-
-AMBIENTE_SONORO:
-|- Descripción REALISTA del sonido ambiental callejero de Saladillo acorde al tenor. Volumen SIEMPRE bajo o muy bajo.
-|- PROHIBIDO mencionar música, instrumental, estudio o corrientes de producción. Ara está en la vía pública; solo se permite sonido urbano ambiental (tráfico lejano, murmullo, viento, pájaros).
-|- Si no hay suficiente contenido para generar ambiente sonoro realista, usar: "Silencio urbano mínimo, sin música ni ruido destacado".
-
-RITMO_CAMARA:
-- Uno de: micro_acercamiento_suave | plano_fijo_estable
-
-REQUIERE_APROBACION_SENSIBLE:
-- true si la noticia trata luto, fallecimientos, accidentes graves, violencia extrema.
-- false en todos los demás casos.
+TONO_VOCAL: Siempre FEMENINA joven, clara.
+EXPRESION_INICIO/DESARROLLO/CIERRE: Solo gestos y miradas, NUNCA palabras habladas entre comillas.
+LENGUAJE_CORPORAL: manos_sueltas_natural | postura_firme_contenida | quietud_respetuosa
+AMBIENTE_SONORO: Sonido callejero real de Saladillo, volumen bajo. PROHIBIDO música/instrumental/estudio.
+RITMO_CAMARA: micro_acercamiento_suave | plano_fijo_estable
+REQUIERE_APROBACION_SENSIBLE: true solo si trata luto/fallecimiento/accidentes graves.
 
 RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin comentarios."""
 
@@ -570,14 +554,16 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
     # ------------------------------------------------------------------
     @staticmethod
     def validate_ara_json(data: Dict) -> tuple[bool, list[str]]:
-        """Valida estructura + persona + estilo del JSON Ara."""
+        """Valida estructura + persona + estilo del JSON Ara (v1.0 y v1.1)."""
         all_errors: list[str] = []
 
         if not isinstance(data, dict):
             return False, ["El resultado no es un objeto JSON"]
 
-        if data.get('version') != '1.0':
-            all_errors.append("'version' debe ser '1.0'")
+        version = data.get('version', '1.0')
+        # Aceptar tanto 1.0 como 1.1
+        if version not in ('1.0', '1.1'):
+            all_errors.append(f"'version' debe ser '1.0' o '1.1', recibido '{version}'")
 
         contenido = data.get('contenido')
         if not isinstance(contenido, dict):
@@ -585,52 +571,108 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         else:
             guion = contenido.get('guion_ara', '')
             palabras = guion.split() if guion else []
-            # Si tiene campos de doble clip, exigir rangos nuevos; sino legacy
-            tiene_split = bool(contenido.get('seccion_a_guion'))
-            if tiene_split:
-                if not guion or len(guion) < 20:
-                    all_errors.append("'guion_ara' vacío o demasiado corto (mín 20 palabras para doble clip)")
+
+            if version == '1.1':
+                # ── VALIDACIÓN v1.1: bloques ────────────────────────────────
+                bloques = contenido.get('bloques')
+                if not isinstance(bloques, list) or len(bloques) < 2:
+                    all_errors.append(
+                        f"'bloques' es requerido para v1.1 y debe tener ≥2 elementos "
+                        f"(tiene {len(bloques) if isinstance(bloques, list) else 'ninguno'})"
+                    )
+                else:
+                    # Cada bloque entre 16 y 22 palabras
+                    for i, blk in enumerate(bloques):
+                        g = blk.get('guion_ara', '')
+                        wc = len(g.split())
+                        if wc < 16:
+                            all_errors.append(
+                                f"Bloque {i+1} muy corto ({wc} palabras); mínimo 16"
+                            )
+                        elif wc > 22:
+                            all_errors.append(
+                                f"Bloque {i+1} muy largo ({wc} palabras); máximo 22"
+                            )
+                        if not any(g.rstrip().endswith(c) for c in '.!?'):
+                            all_errors.append(
+                                f"Bloque {i+1} sin puntuación final de oración"
+                            )
+                    # Último bloque debe mencionar Saladillo Vivo
+                    if bloques:
+                        last = bloques[-1].get('guion_ara', '')
+                        if 'saladillo vivo' not in last.lower():
+                            all_errors.append(
+                                "Último bloque debe mencionar 'Saladillo Vivo'"
+                            )
+                # guion_ara concatenado: máximo 45 palabras en total
+                if not guion or len(palabras) < 30:
+                    all_errors.append(
+                        f"'guion_ara' concatenated too short ({len(palabras)} words)"
+                    )
                 elif len(palabras) > 45:
-                    all_errors.append(f"'guion_ara' excede 45 palabras ({len(palabras)})")
-                elif len(palabras) < 22:
-                    all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (mínimo 22 para dos clips)")
+                    all_errors.append(
+                        f"'guion_ara' excede 45 palabras ({len(palabras)})"
+                    )
             else:
-                if not guion or len(guion) < 10:
-                    all_errors.append("'guion_ara' vacío o demasiado corto")
-                elif len(palabras) > 25:
-                    all_errors.append(f"'guion_ara' excede 25 palabras ({len(palabras)})")
-                elif len(palabras) < 15:
-                    all_errors.append(f"'guion_ara' tiene solo {len(palabras)} palabras (ideal 18-22)")
+                # ── VALIDACIÓN v1.0 (legacy): seccion_a/b ───────────────────
+                tiene_split = bool(contenido.get('seccion_a_guion'))
+                if tiene_split:
+                    if not guion or len(guion) < 20:
+                        all_errors.append(
+                            "'guion_ara' vacío o demasiado corto (mín 20 palabras para doble clip)")
+                    elif len(palabras) > 45:
+                        all_errors.append(
+                            f"'guion_ara' excede 45 palabras ({len(palabras)})")
+                    elif len(palabras) < 22:
+                        all_errors.append(
+                            f"'guion_ara' tiene solo {len(palabras)} palabras "
+                            f"(mínimo 22 para dos clips)")
+                else:
+                    if not guion or len(guion) < 10:
+                        all_errors.append("'guion_ara' vacío o demasiado corto")
+                    elif len(palabras) > 25:
+                        all_errors.append(
+                            f"'guion_ara' excede 25 palabras ({len(palabras)})")
+                    elif len(palabras) < 15:
+                        all_errors.append(
+                            f"'guion_ara' tiene solo {len(palabras)} palabras (ideal 18-22)")
 
             volanta = contenido.get('volanta_zocalo', '')
             if not volanta:
                 all_errors.append("'volanta_zocalo' vacío")
             elif len(volanta.split()) > 3:
-                all_errors.append(f"'volanta_zocalo' excede 3 palabras ({len(volanta.split())})")
+                all_errors.append(
+                    f"'volanta_zocalo' excede 3 palabras ({len(volanta.split())})")
 
             titulo_z = contenido.get('titulo_zocalo', '')
             if not titulo_z:
                 all_errors.append("'titulo_zocalo' vacío")
             elif len(titulo_z.split()) > 8:
-                all_errors.append(f"'titulo_zocalo' excede 8 palabras ({len(titulo_z.split())})")
+                all_errors.append(
+                    f"'titulo_zocalo' excede 8 palabras ({len(titulo_z.split())})")
 
-            # --- Nuevos campos para doble clip (tolerantes: no error si faltan) ---
+            # Legacy secciones (solo si existen; tolerantes si faltan)
             seccion_a = contenido.get('seccion_a_guion', '')
             if seccion_a:
                 a_words = seccion_a.split()
                 if len(a_words) < 10 or len(a_words) > 25:
-                    all_errors.append(f"'seccion_a_guion' tiene {len(a_words)} palabras (ideal 14-18)")
-                if seccion_a.strip() and not any(seccion_a.rstrip().endswith(c) for c in '.!¿?'):
+                    all_errors.append(
+                        f"'seccion_a_guion' tiene {len(a_words)} palabras (ideal 14-18)")
+                if seccion_a.strip() and not any(seccion_a.rstrip().endswith(c)
+                                                  for c in '.!¿?'):
                     all_errors.append("'seccion_a_guion' no termina con puntuación final")
 
             seccion_b = contenido.get('seccion_b_guion', '')
             if seccion_b:
                 b_words = seccion_b.split()
                 if len(b_words) < 10 or len(b_words) > 25:
-                    all_errors.append(f"'seccion_b_guion' tiene {len(b_words)} palabras (ideal 14-18)")
+                    all_errors.append(
+                        f"'seccion_b_guion' tiene {len(b_words)} palabras (ideal 14-18)")
                 if 'saladillo vivo' not in seccion_b.lower():
-                    all_errors.append("'seccion_b_guion' debe mencionar 'Saladillo Vivo' al cerrar")
-                if seccion_b.strip() and not any(seccion_b.rstrip().endswith(c) for c in '.!¿?'):
+                    all_errors.append(
+                        "'seccion_b_guion' debe mencionar 'Saladillo Vivo' al cerrar")
+                if seccion_b.strip() and not any(seccion_b.rstrip().endswith(c)
+                                                  for c in '.!¿?'):
                     all_errors.append("'seccion_b_guion' no termina con puntuación final")
 
             corte = contenido.get('corte_en_palabra', '')
@@ -643,7 +685,8 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         else:
             tenor = meta.get('tenor', '')
             if tenor not in TENOR_VALUES:
-                all_errors.append(f"'tenor' inválido: '{tenor}'. Valores permitidos: {TENOR_VALUES}")
+                all_errors.append(
+                    f"'tenor' inválido: '{tenor}'. Valores permitidos: {TENOR_VALUES}")
 
             permitir = meta.get('permitir_sonrisa')
             if not isinstance(permitir, bool):
@@ -656,6 +699,15 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
             ritmo = meta.get('ritmo_camara', '')
             if ritmo not in RITMO_CAMARA_VALUES:
                 all_errors.append(f"'ritmo_camara' inválido: '{ritmo}'")
+
+            # ── Continuidad visual obligatoria en v1.1 ───────────────────
+            if version == '1.1':
+                if not meta.get('continuidad_visual'):
+                    all_errors.append(
+                        "'continuidad_visual' es requerido para v1.1 en meta_ara")
+                elif len(str(meta['continuidad_visual'])) < 20:
+                    all_errors.append(
+                        "'continuidad_visual' muy breve; debe describir vestimenta, luz y locación")
 
             if permitir is False:
                 PROHIBITED_WORDS = ['sonrisa', 'sonriendo', 'sonriente', 'alegre',
@@ -688,10 +740,7 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
 
     @staticmethod
     def apply_heuristic_fallback(title: str, content: str, tono: str) -> Dict:
-        """
-        Fallback heurístico cuando falla la API. Produce un JSON Ara mínimo
-        pero válido para que el pipeline no se detenga.
-        """
+        """Fallback heurístico para JSON Ara v1.1 con bloques multi-clip."""
         tenor_map = {
             'SOLEMNE': 'sensible_luto',
             'ALEGRE': 'alegre_cultural',
@@ -700,24 +749,20 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         tenor = tenor_map.get(str(tono).upper(), 'informativo_servicio')
         permitir_sonrisa = tenor in ('alegre_cultural', 'informativo_servicio')
 
-        # Extraer idea principal del título para volanta
         title_words = title.split()[:3]
         volanta = ' '.join(title_words)
 
-        # Titulo zócalo derivado del primer párrafo — máx 8 palabras
         first_sentence = re.split(r'[.\n]', content)[0].strip() if content else title
         titulo_words = first_sentence.split()[:8]
         titulo_z = ' '.join(titulo_words) if titulo_words else title[:40]
 
-        # Guion heurístico: condensar contenido a ~35 palabras para dos clips
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', content) if s.strip()]
         acc = []
         wc = 0
         for s in sentences:
             parts = s.split()
-            # Acortar cada oración si excede el objetivo (~35 palabras total)
-            if wc + len(parts) > 36:
-                extra = 36 - wc
+            if wc + len(parts) > 50:
+                extra = 50 - wc
                 if extra >= 3:
                     acc.append(' '.join(parts[:extra]))
                 break
@@ -726,90 +771,229 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
         full_text = ' '.join(acc).strip()
         if not full_text.endswith('.'):
             full_text += '.'
-        # Si aún está corto (<30), repetir idea clave del título
-        while len(full_text.split()) < 30 and title:
-            full_text += f' {title}.'
-            too_long = full_text.split()
-            if len(too_long) > 40:
-                full_text = ' '.join(too_long[:39]) + '.'
+
+        # Expandir contenido corto con el título si es necesario
+        orig_wc = len(full_text.split())
+        if orig_wc < 35 and title:
+            test = full_text.rstrip() + f' {title}.'
+            added = len(test.split()) - orig_wc
+            if added >= 2 and len(test.split()) <= 45:
+                full_text = test
         if not full_text.endswith('.'):
             full_text += '.'
+        # Recortar a máximo 45 palabras totales manteniendo oraciones completas
+        ftw = full_text.split()
+        if len(ftw) > 45:
+            for j in range(44, max(28, len(ftw) - 3), -1):
+                cand = ' '.join(ftw[:j])
+                if cand.rstrip().endswith('.'):
+                    full_text = cand + '.'
+                    break
+            else:
+                full_text = ' '.join(ftw[:45]) + '.'
 
         # Asegurar que SIEMPRE se menciona Saladillo Vivo al cierre
         if 'saladillo vivo' not in full_text.lower():
             cierre = 'Toda la información en Saladillo Vivo.'
-            current_words = full_text.split()
-            gap = len(cierre.split()) + 1
-            while len(current_words) + gap > 36 and len(current_words) > gap:
-                current_words.pop()
-            full_text = ' '.join(current_words).rstrip()
-            if full_text.endswith('.'):
-                full_text += f' {cierre}'
+            tw = full_text.split()
+            cierre_wds = cierre.split()
+            body_budget = 45 - len(cierre_wds) - 1  # -1 por el espacio
+            if len(tw) > body_budget:
+                trimmed = False
+                for j in range(body_budget, max(15, body_budget - 10), -1):
+                    cand = ' '.join(tw[:j]).rstrip()
+                    if cand.endswith('.') or cand.endswith('!') or cand.endswith('?'):
+                        full_text = cand + ' ' + cierre
+                        trimmed = True
+                        break
+                if not trimmed:
+                    full_text = ' '.join(tw[:body_budget]).rstrip() + '. ' + cierre
             else:
-                full_text = f'{full_text}. {cierre}'
+                full_text = full_text.rstrip() + ' ' + cierre
 
-        # Dividir en dos secciones equilibradas (~mitad + mitad, cortando en último punto antes del 50%)
+        # Si después del cierre aún no alcanzamos 30 palabras, agregar contexto
+        current_wc = len(full_text.split())
+        if current_wc < 30:
+            extra_phrases = {
+                'ALEGRE': f'{title} reúne a muchas personas este fin de semana en Saladillo.',
+                'SOLEMNE': f'La comunidad de Saladillo se conmueve ante este acontecimiento.',
+                'NEUTRAL': f'Más detalles sobre {title} se conocerán en las próximas horas.',
+            }
+            extra = extra_phrases.get(str(tono).upper(), f'Información sobre {title}.')
+            while len(full_text.split()) < 30:
+                test = full_text.rstrip() + ' ' + extra
+                if len(test.split()) > 45:
+                    break
+                full_text = test.strip()
+
+        # Dividir en bloques de 16-22 palabras cada uno
         all_words = full_text.split()
         n = len(all_words)
-        target_a = max(14, min(n // 2, 22))
-        # Buscar mejor punto de corte: última oración completa <= target_a + 4
-        cut_idx = -1
-        search_limit = min(n - 10, target_a + 4)
-        for i in range(target_a, search_limit + 1):
-            candidate = ' '.join(all_words[:i+1])
-            if candidate.rstrip().endswith('.'):
-                cut_idx = i
-                break
-        # Si no encontró, buscar hacia atrás desde target_a
-        if cut_idx == -1:
-            for i in range(target_a - 1, 10, -1):
-                candidate = ' '.join(all_words[:i])
-                if candidate.rstrip().endswith('.'):
-                    cut_idx = i - 1
+        # Calcular número de bloques según densidad
+        if n <= 32:
+            num_blocks = 2
+        elif n <= 50:
+            num_blocks = 2
+        else:
+            num_blocks = 3
+        target_per_block = max(16, min(22, n // num_blocks))
+
+        # ---- División en bloques por ORACIONES (garantiza cortes limpios) ----
+        # Cada bloque tendrá 16-22 palabras, compuesto de oraciones completas.
+        CIERRE = 'Toda la información en Saladillo Vivo.'
+        cierre_wds = CIERRE.split()
+
+        def block_has_cierre(text):
+            return 'saladillo vivo' in text.lower()
+
+        def ensure_cierre(text):
+            # Solo agregar cierre si NO está ya presente
+            if 'saladillo vivo' not in text.lower():
+                return text.rstrip('.') + '. ' + CIERRE
+            return text
+
+        def trim_to_max(text, max_w=22):
+            wds = text.split()
+            if len(wds) <= max_w:
+                return text
+            for j in range(max_w - 1, max(15, len(wds) - 8), -1):
+                cand = ' '.join(wds[:j])
+                if cand.rstrip().endswith('.'):
+                    return cand
+            return ' '.join(wds[:max_w - len(cierre_wds)]) + '. ' + CIERRE if len(wds) - len(cierre_wds) >= 15 else ' '.join(wds[:max_w - 1]) + '.'
+
+        # Oraciones del texto completo (respetando .!?)
+        sentences = re.split(r'(?<=[.!?])\s+', full_text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = [s if s[-1] in '.!?' else s + '.' for s in sentences]
+
+        # Greedy pack: juntar oraciones hasta alcanzar >= 16 palabras, sin pasar de 22
+        blocks = []
+        current = ""
+        current_wc = 0
+        for sent in sentences:
+            swc = len(sent.split())
+            # Si agregar esta oración excede 22, cerrar el bloque actual
+            if current and current_wc + swc > 22:
+                blocks.append(current)
+                current = ""
+                current_wc = 0
+            if current:
+                current += " " + sent
+                current_wc += swc
+            else:
+                current = sent
+                current_wc = swc
+        if current:
+            blocks.append(current)
+
+        # Si quedó un único bloque enorme (>22 palabras por una oración larga),
+        # forzar un corte en una frontera de oración interna
+        if len(blocks) == 1 and len(blocks[0].split()) > 22:
+            all_w = blocks[0].split()
+            cut = 16
+            for j in range(22, 15, -1):
+                cand = ' '.join(all_w[:j])
+                if cand.rstrip().endswith('.'):
+                    cut = j
                     break
-        # Fallback: si nada funcionó, cortar en target_a sin importar puntuación
-        if cut_idx == -1:
-            cut_idx = target_a
+            blocks = [
+                ' '.join(all_w[:cut]).rstrip() + '.',
+                ' '.join(all_w[cut:]).rstrip() + '.',
+            ]
 
-        sec_a_text = ' '.join(all_words[:cut_idx+1]).rstrip()
-        if not sec_a_text.endswith('.'):
-            sec_a_text += '.'
-        sec_b_text = ' '.join(all_words[cut_idx+1:]).rstrip()
-        if not sec_b_text.endswith('.'):
-            sec_b_text += '.'
-        # Asegurar que sección B siempre cierre con Saladillo Vivo
-        if 'saladillo vivo' not in sec_b_text.lower():
-            sec_b_text = sec_b_text.rstrip('.') + '. Toda la información en Saladillo Vivo.'
-        corte_word = all_words[cut_idx].rstrip('.,;:')
+        # Asegurar cierre en el último bloque
+        if blocks:
+            blocks[-1] = ensure_cierre(blocks[-1])
 
-        guion = full_text
+        # Rebalancear bloques < 16 palabras tomando una oración del siguiente
+        balanced = []
+        i = 0
+        while i < len(blocks):
+            blk = blocks[i]
+            wc = len(blk.split())
+            if wc < 16:
+                if i + 1 < len(blocks):
+                    nxt = blocks[i + 1]
+                    nxt_sentences = re.split(r'(?<=[.!?])\s+', nxt)
+                    nxt_sentences = [s.strip() for s in nxt_sentences if s.strip()]
+                    if nxt_sentences:
+                        first_nxt = nxt_sentences[0]
+                        if wc + len(first_nxt.split()) <= 22:
+                            blocks[i] = blk.rstrip('.') + '. ' + first_nxt
+                            rest = ' '.join(nxt_sentences[1:]).strip()
+                            if not rest:
+                                blocks.pop(i + 1)
+                                continue
+                            if rest[-1] not in '.!?':
+                                rest += '.'
+                            blocks[i + 1] = rest
+                        else:
+                            balanced.append(blk)
+                            i += 1
+                            continue
+                    else:
+                        blocks.pop(i + 1)
+                        continue
+                else:
+                    balanced.append(blk)
+                    i += 1
+                    continue
+            else:
+                balanced.append(blk)
+                i += 1
+        blocks = balanced
+
+        # Volver a asegurar cierre en el último bloque tras el rebalanceo
+        if blocks:
+            blocks[-1] = ensure_cierre(blocks[-1])
+
+        # Truncar cualquier bloque que exceda 22 tras el rebalanceo/cierre
+        for bi in range(len(blocks)):
+            if len(blocks[bi].split()) > 22:
+                blocks[bi] = trim_to_max(blocks[bi], 22)
+
+        # Construir la lista final de dicts
+        blocks = [
+            {"orden": idx + 1, "guion_ara": txt}
+            for idx, txt in enumerate(blocks)
+        ]
+
+        guion_concat = ' '.join(b["guion_ara"] for b in blocks)
 
         return {
-            "version": "1.0",
+            "version": "1.1",
             "contenido": {
-                "guion_ara": guion,
-                "seccion_a_guion": sec_a_text,
-                "seccion_b_guion": sec_b_text,
-                "corte_en_palabra": corte_word,
+                "guion_ara": guion_concat,
+                "bloques": blocks,
                 "volanta_zocalo": volanta,
                 "titulo_zocalo": titulo_z,
             },
             "meta_ara": {
                 "tenor": tenor,
                 "permitir_sonrisa": permitir_sonrisa,
-                "tono_vocal": ("Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
-                               if permitir_sonrisa else "Femenina joven, tono sereno y sobrio, español argentino rioplatense"),
+                "tono_vocal": (
+                    "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense"
+                    if permitir_sonrisa
+                    else "Femenina joven, tono sereno y sobrio, español argentino rioplatense"
+                ),
                 "expresion_inicio": (
                     "Mirá fija al lente con leve asentimiento inicial, expresión abierta y cercana"
-                    if permitir_sonrisa else
-                    "Mirada seria al lente, leve inclinación de cabeza, expresión compasiva y contenida"
+                    if permitir_sonrisa
+                    else "Mirada seria al lente, leve inclinación de cabeza, expresión compasiva y contenida"
                 ),
-                "expresion_desarrollo": EXPRESION_desarrollo_VALUES.get(tenor, "gestos naturales, mantiene contacto visual constante"),
+                "expresion_desarrollo": EXPRESION_desarrollo_VALUES.get(
+                    tenor, "gestos naturales, mantiene contacto visual constante"),
                 "expresion_cierre": "Despedida con leve asentimiento sereno, mantiene la mirada al lente antes de cerrar",
                 "lenguaje_corporal": "postura_firme_contenida",
                 "ambiente_sonoro": AMBIENTE_SONORO_VALUES[0],
                 "ritmo_camara": "micro_acercamiento_suave",
                 "requiere_aprobacion_sensible": tenor == 'sensible_luto',
+                "continuidad_visual": (
+                    "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino "
+                    "sobre blusa blanca, maquillaje natural, iluminación natural frontal desde la izquierda, "
+                    "locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo"
+                ),
             },
         }
 

@@ -14,7 +14,7 @@ interface ReproductorMultimediaProps {
 
 export default function ReproductorMultimedia({ onComplete, videoToPlay }: ReproductorMultimediaProps) {
   const { currentVideo, isPlaying } = usePlayerStore();
-  const videoPlayerRef = React.useRef<HTMLVideoElement>(null);
+  const videoPlayerRef = React.useRef<HTMLVideoElement>(null!);
 
   const handleVideoEnd = () => {
     onComplete();

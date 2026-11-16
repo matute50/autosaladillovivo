@@ -9,12 +9,44 @@ import { Switch } from '@/components/studio/Switch'
 import { AlertTriangle, CheckCircle2, XCircle, Video, Image as ImageIcon, FileText } from 'lucide-react'
 
 export default function InspectorPage() {
-  const [articleId] = useState('')
+  const [articleId, setArticleId] = useState('')
   const [wordCount, setWordCount] = useState(0)
   const [hasSmile, setHasSmile] = useState(false)
   const [hasGreen, setHasGreen] = useState(false)
   const [creditsUsed, setCreditsUsed] = useState(1)
   const [modeChroma] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<{ kind: 'ok' | 'err' | 'info'; msg: string } | null>(null)
+
+  async function regenerateImage() {
+    const id = Number(articleId)
+    if (!id || !Number.isInteger(id) || id <= 0) {
+      setStatus({ kind: 'err', msg: 'Ingresá un ID de noticia válido antes de regenerar.' })
+      return
+    }
+    setLoading(true)
+    setStatus({ kind: 'info', msg: `Encolando imagen maestra para la noticia ${id}...` })
+    try {
+      const res = await fetch('/api/factory/master-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articleId: id }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        setStatus({ kind: 'err', msg: data.error || 'No se pudo encolar la imagen.' })
+      } else {
+        setStatus({
+          kind: 'ok',
+          msg: `Imagen maestra encolada (job #${data.jobId}). El worker la genera con Nano Banana 2 Lite y la sube a Storage.`,
+        })
+      }
+    } catch (e: any) {
+      setStatus({ kind: 'err', msg: e?.message || 'Error de red al encolar la imagen.' })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -27,7 +59,12 @@ export default function InspectorPage() {
         </CardHeader>
         <CardContent>
           <div className="flex gap-2">
-            <Input placeholder="ID o slug de la noticia..." className="max-w-xs" />
+            <Input
+              placeholder="ID o slug de la noticia..."
+              className="max-w-xs"
+              value={articleId}
+              onChange={(e) => setArticleId(e.target.value)}
+            />
             <Button variant="outline">Buscar</Button>
           </div>
         </CardContent>
@@ -129,7 +166,7 @@ export default function InspectorPage() {
               <div>
                 <p className="font-semibold text-muted-foreground mb-1">Prompt imagen maestra:</p>
                 <code className="block p-2 bg-muted rounded text-wrap break-all">
-                  Woman journalist in navy blazer, white blouse, black hair low ponytail...
+                  Young woman journalist with natural curly black hair, styled up in different ways with hair accessories, navy blazer over white blouse, natural and professional makeup, warm rioplatense accent, close and expressive look...
                 </code>
               </div>
               <div>
@@ -170,13 +207,18 @@ export default function InspectorPage() {
                 />
               </div>
               <div className="mt-4 flex gap-2">
-                <Button size="sm" className="gap-2">
-                  <ImageIcon className="w-3.5 h-3.5" /> Regenerar imagen maestra (gratis)
+                <Button size="sm" className="gap-2" onClick={regenerateImage} disabled={loading}>
+                  <ImageIcon className="w-3.5 h-3.5" /> {loading ? 'Encolando...' : 'Regenerar imagen maestra (gratis)'}
                 </Button>
                 <Button size="sm" variant="outline" className="gap-2">
                   <Video className="w-3.5 h-3.5" /> Re-renderizar video
                 </Button>
               </div>
+              {status && (
+                <p className={`mt-2 text-sm ${status.kind === 'ok' ? 'text-green-600' : status.kind === 'err' ? 'text-red-600' : 'text-muted-foreground'}`}>
+                  {status.msg}
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

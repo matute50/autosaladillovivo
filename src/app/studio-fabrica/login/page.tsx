@@ -1,23 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { useActionState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useActionState, Suspense, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from '@/components/ui/use-toast'
-import { useEffect } from 'react'
 
-export default function LoginPage() {
-  const router = useRouter()
+function LoginForm() {
   const searchParams = useSearchParams()
   const redirectTo = searchParams.get('next') || '/studio-fabrica'
   const [state, formAction, pending] = useActionState(signIn, null)
-
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-  }
 
   // Show error toast when there's an error
   useEffect(() => {
@@ -40,7 +33,7 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <input type="hidden" name="redirectTo" value={redirectTo} />
             <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium leading-none">
@@ -77,5 +70,19 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+          <div className="animate-pulse text-muted-foreground">Cargando...</div>
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   )
 }

@@ -138,14 +138,14 @@ ON CONFLICT (slug) DO NOTHING;
 INSERT INTO public.video_weather_rules (temp_min, temp_max, condicion, franja_horaria,
   vestuario_sugerido, peinado_sugerido, luz_prompt_sugerida, override_luto_oscuro)
 VALUES
-  (0, 12, 'despejado', 'amanecer', 'Abrigo ligero claro, bufanda neutra', 'Cabello recogido', 'Luz suave dorada temprana, dirección lateral izquierda', false),
-  (12, 22, 'despejado', 'dia', 'Blazer claro o camisa ligera', 'Cabello suelto o medio recogido', 'Luz natural frontal difusa, rebote suave', false),
-  (22, 35, 'despejado', 'dia', 'Camisa fresca, colores claros', 'Cabello recogido para mayor frescura', 'Luz natural moderada, evitar sobreexposición', false),
-  (0, 25, 'nublado', 'dia', 'Capa media, colores tierra', 'Sin cambios especiales', 'Luz difusa uniforme, ideal para retrato', false),
-  (0, 35, 'lluvia', 'dia', 'Abrigo impermeable oscuro, sombrero si es necesario', 'Cabello protegido del agua', 'Luz grisácea difusa, ambiente tenso', true),
-  (0, 35, 'viento', 'dia', 'Prenda ajustada, capa ligera', 'Cabello sujeto firmemente', 'Luz natural, sombras movidas por viento', false),
-  (0, 15, 'despejado', 'noche', 'Abrigo oscuro formal', 'Cabello recogido', 'Iluminación artificial cálida, contraste medio', false),
-  (15, 35, 'despejado', 'atardecer', 'Tonos cálidos, textura ligera', 'Libre o recogido bajo', 'Luz dorada lateral, silhouette suave', false)
+  (0, 12, 'despejado', 'amanecer', 'Abrigo ligero claro, bufanda neutra', 'Rizos naturales recogidos con accesorio simple', 'Luz suave dorada temprana, dirección lateral izquierda', false),
+  (12, 22, 'despejado', 'dia', 'Blazer claro o camisa ligera', 'Rizos naturales sueltos o semirrecogidos con accesorio', 'Luz natural frontal difusa, rebote suave', false),
+  (22, 35, 'despejado', 'dia', 'Camisa fresca, colores claros', 'Rizos naturales recogidos para frescura, con accesorio', 'Luz natural moderada, evitar sobreexposición', false),
+  (0, 25, 'nublado', 'dia', 'Capa media, colores tierra', 'Rizos naturales sueltos, accesorio ligero', 'Luz difusa uniforme, ideal para retrato', false),
+  (0, 35, 'lluvia', 'dia', 'Abrigo impermeable oscuro, sombrero si es necesario', 'Rizos naturales recogidos para protegerlos del agua', 'Luz grisácea difusa, ambiente tenso', true),
+  (0, 35, 'viento', 'dia', 'Prenda ajustada, capa ligera', 'Rizos naturales recogidos firmes para el viento', 'Luz natural, sombras movidas por viento', false),
+  (0, 15, 'despejado', 'noche', 'Abrigo oscuro formal', 'Rizos naturales recogidos elegantes con accesorio', 'Iluminación artificial cálida, contraste medio', false),
+  (15, 35, 'despejado', 'atardecer', 'Tonos cálidos, textura ligera', 'Rizos naturales sueltos o recogido bajo con accesorio', 'Luz dorada lateral, silhouette suave', false)
 ON CONFLICT DO NOTHING;
 
 -- Config global del piloto automático

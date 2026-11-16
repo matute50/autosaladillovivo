@@ -40,7 +40,10 @@ export const useNewsPlayerStore = create<NewsPlayerState>()(
                 currentSlide: {
                     url: slideUrl,
                     type: 'html',
-                    embedsAudio: true
+                    // Los slides HTML no tienen <audio> interno; el audio es
+                    // centralizado por VideoSection.tsx via postMessage.
+                    // Debe ser false para evitar montaje redundante.
+                    embedsAudio: false
                 },
                 isSlideOpen: true,
                 isPlaying: true,
@@ -60,7 +63,8 @@ export const useNewsPlayerStore = create<NewsPlayerState>()(
                         currentSlide: {
                             url: slide,
                             type: 'html',
-                            embedsAudio: true
+                            // Los slides HTML son centralizados por VideoSection.
+                            embedsAudio: false
                         },
                         isSlideOpen: false,
                         isPlaying: true,
@@ -71,7 +75,8 @@ export const useNewsPlayerStore = create<NewsPlayerState>()(
                         ...slide,
                         type: slide.type || 'html',
                         audioUrl: slide.audioUrl === undefined ? null : slide.audioUrl,
-                        embedsAudio: slide.embedsAudio ?? true
+                        // Default: slides HTML son centralizados, no embebidos.
+                        embedsAudio: slide.embedsAudio ?? false
                     };
                     set({
                         currentSlide: normalizedSlide,

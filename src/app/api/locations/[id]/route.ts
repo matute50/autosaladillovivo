@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
 function isValidUUID(str: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)
@@ -12,7 +12,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Invalid location ID' }, { status: 400 })
   }
   const body = await request.json()
-  const supabase = await createSupabaseServerClient()
+  const supabase = createSupabaseAdminClient()
 
   const { data, error } = await supabase
     .from('video_locations')
@@ -31,7 +31,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!isValidUUID(id)) {
     return NextResponse.json({ error: 'Invalid location ID' }, { status: 400 })
   }
-  const supabase = await createSupabaseServerClient()
+  const supabase = createSupabaseAdminClient()
 
   const { error } = await supabase.from('video_locations').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

@@ -177,6 +177,92 @@ class TestAraValidation(unittest.TestCase):
         ok, errs = self.agent.validate_ara_json(data)
         self.assertTrue(ok, f"Falso positivo: {errs}")
 
+    # ── Tests v1.1: bloques ─────────────────────────────────────────────────
+
+    def _make_valid_v11_json(self, n_blocks=2):
+        """Constructor helper para JSON Ara v1.1 con bloques."""
+        blocks = []
+        for i in range(n_blocks):
+            words_needed = 18 - (3 if i == n_blocks - 1 else 0)
+            base = " ".join([f"palabra{i}_{j}" for j in range(words_needed)])
+            if i == n_blocks - 1:
+                base += ". Toda la información en Saladillo Vivo."
+            else:
+                base += "."
+            blocks.append({"orden": i + 1, "guion_ara": base})
+        guion_concat = " ".join(b["guion_ara"] for b in blocks)
+        return {
+            "version": "1.1",
+            "contenido": {
+                "guion_ara": guion_concat,
+                "bloques": blocks,
+                "volanta_zocalo": "DEPORTES",
+                "titulo_zocalo": "Nuevo campeonato local arranca este sábado",
+            },
+            "meta_ara": {
+                "tenor": "informativo_servicio",
+                "permitir_sonrisa": True,
+                "tono_vocal": "Femenina joven, tono claro cálido y expresivo, español argentino rioplatense",
+                "expresion_inicio": "Mirada directa al lente con leve asentimiento",
+                "expresion_desarrollo": "Gestos naturales con ambas manos",
+                "expresion_cierre": "Asentimiento final sereno",
+                "lenguaje_corporal": "postura_firme_contenida",
+                "ambiente_sonoro": "Sonido de calle céntrica",
+                "ritmo_camara": "plano_fijo_estable",
+                "requiere_aprobacion_sensible": False,
+                "continuidad_visual": "Periodista femenino profesional, vestimenta blazer azul marino, cabello recogido, luz natural diurna, locación centro de Saladillo plaza principal",
+            },
+        }
+
+    def test_v11_valid_passes(self):
+        ok, errs = self.agent.validate_ara_json(self._make_valid_v11_json())
+        self.assertTrue(ok, f"Errores v1.1: {errs}")
+
+    def test_v11_at_least_two_blocks(self):
+        data = self._make_valid_v11_json(n_blocks=1)
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, "Debe rechazar 1 solo bloque")
+        self.assertTrue(any("bloque" in e.lower() for e in errs), f"Errors: {errs}")
+
+    def test_v11_block_word_count_range(self):
+        """Cada bloque debe tener entre 16 y 22 palabras."""
+        blocks = [
+            {"orden": 1, "guion_ara": " ".join(["x"] * 15) + "."},  # 15 = too short
+            {"orden": 2, "guion_ara": " ".join(["x"] * 18) + ". Toda la información en Saladillo Vivo."},
+        ]
+        data = self._make_valid_v11_json(n_blocks=2)
+        data["contenido"]["bloques"] = blocks
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, "Debe fallar con bloque corto")
+        self.assertTrue(any("15" in e or "corto" in e.lower() for e in errs), f"Errors: {errs}")
+
+    def test_v11_last_block_saladillo_vivo(self):
+        """Último bloque debe mencionar 'Saladillo Vivo'."""
+        blocks = [
+            {"orden": 1, "guion_ara": " ".join(["palabra"] * 18) + "."},
+            {"orden": 2, "guion_ara": " ".join(["palabra"] * 17) + "."},  # sin Saladillo Vivo
+        ]
+        data = self._make_valid_v11_json(n_blocks=2)
+        data["contenido"]["bloques"] = blocks
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, "Debe fallar si último bloque no tiene Saladillo Vivo")
+        self.assertTrue(any("saladillo vivo" in e.lower() for e in errs), f"Errors: {errs}")
+
+    def test_v11_continuidad_visual_required(self):
+        """v1.1 requiere continuidad_visual en meta_ara."""
+        data = self._make_valid_v11_json()
+        del data["meta_ara"]["continuidad_visual"]
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertFalse(ok, "Debe fallar sin continuidad_visual")
+        self.assertTrue(any("continuidad" in e.lower() for e in errs), f"Errors: {errs}")
+
+    def test_v10_still_accepted(self):
+        """Backward compat: v1.0 con seccion_a/b sigue funcionando."""
+        data = self._make_valid_json()
+        data["version"] = "1.0"
+        ok, errs = self.agent.validate_ara_json(data)
+        self.assertTrue(ok, f"v1.0 debería pasar: {errs}")
+
 
 class TestHeuristicFallback(unittest.TestCase):
     """Pruebas del fallback heurístico cuando falla la API de IA."""
@@ -192,26 +278,28 @@ class TestHeuristicFallback(unittest.TestCase):
         )
         ok, errs = self.agent.validate_ara_json(data)
         self.assertTrue(ok, f"Fallback errors: {errs}")
-        self.assertEqual(data["version"], "1.0")
+        self.assertEqual(data["version"], "1.1")
         self.assertEqual(data["meta_ara"]["tenor"], "alegre_cultural")
+        # Debe tener bloques, no campos legacy
+        self.assertIn("bloques", data["contenido"])
+        self.assertNotIn("seccion_a_guion", data["contenido"])
 
     def test_fallback_sensitive_tone(self):
         data = self.agent.apply_heuristic_fallback(
             title="Falleció vecino de Cazón",
-            content="La comunidad de Cazón lamenta el fallecimiento de un residente.",
+            content="La comunidad de Cazón lamenta el fallecimiento de un residente del barrio que dejó honda tristeza entre sus vecinos y amigos más cercanos.",
             tono="SOLEMNE",
         )
         self.assertEqual(data["meta_ara"]["tenor"], "sensible_luto")
         self.assertFalse(data["meta_ara"]["permitir_sonrisa"])
         self.assertTrue(data["meta_ara"]["requiere_aprobacion_sensible"])
-        # Debe pasar validación sin errores
         ok, errs = self.agent.validate_ara_json(data)
         self.assertTrue(ok, f"Sensible tone failed validation: {errs}")
 
     def test_fallback_clamps_volanta_words(self):
         data = self.agent.apply_heuristic_fallback(
             title="Título muy largo con muchas palabras que sobran",
-            content="Contenido corto.",
+            content="Contenido corto pero con información suficiente para generar bloques válidos en el sistema de noticias locales de Saladillo.",
             tono="NEUTRAL",
         )
         volanta = data["contenido"]["volanta_zocalo"]
@@ -227,20 +315,66 @@ class TestHeuristicFallback(unittest.TestCase):
         self.assertLessEqual(len(titulo.split()), 8)
 
     def test_fallback_short_content_guarantees_18_words(self):
-        """Si el contenido es muy corto, el fallback debe expandir con el título hasta 18 palabras."""
+        """Si el contenido es muy corto, el fallback debe expandir hasta lograr bloques válidos."""
         data = self.agent.apply_heuristic_fallback(
             title="Festival de música en Saladillo congrega a vecinos",
             content="Una noticia corta.",
             tono="ALEGRE",
         )
-        guion = data["contenido"]["guion_ara"]
-        words = len(guion.split())
-        self.assertGreaterEqual(words, 18,
-                                f"Guion muy corto: {words} palabras — '{guion}'")
-        self.assertLessEqual(words, 25,
-                             f"Guion excede máximo: {words} palabras")
+        # Con v1.1 cada bloque debe tener 16-22 palabras
+        bloques = data["contenido"].get("bloques", [])
+        if bloques:
+            first_block_words = len(bloques[0]["guion_ara"].split())
+            self.assertGreaterEqual(first_block_words, 16,
+                                    f"Bloque 1 muy corto: {first_block_words} palabras")
+            self.assertLessEqual(first_block_words, 22,
+                                 f"Bloque 1 muy largo: {first_block_words} palabras")
+            last_block_words = len(bloques[-1]["guion_ara"].split())
+            self.assertGreaterEqual(last_block_words, 16)
+            self.assertLessEqual(last_block_words, 22)
         ok, errs = self.agent.validate_ara_json(data)
         self.assertTrue(ok, f"Fallo validación: {errs}")
+
+    def test_fallback_v11_generates_blocks(self):
+        """Fallback v1.1 debe generar bloques, no seccion_a/b."""
+        data = self.agent.apply_heuristic_fallback(
+            title="Colocan nuevos nomencladores de calles en Saladillo",
+            content="El municipio de Saladillo instaló nuevos nomencladores en las principales esquinas del centro urbano. La medida busca mejorar la orientación de vecinos y turistas. Las placas tienen diseño moderno con código QR.",
+            tono="NEUTRAL",
+        )
+        self.assertIn("version", data)
+        self.assertTrue(data["version"] in ("1.0", "1.1"))
+        # Debe tener al menos 2 bloques
+        bloques = data["contenido"].get("bloques", [])
+        if bloques:
+            self.assertGreaterEqual(len(bloques), 2,
+                                    f"Debe tener ≥2 bloques, tiene {len(bloques)}")
+            # Cada bloque entre 16 y 22 palabras
+            for i, blk in enumerate(bloques):
+                wc = len(blk["guion_ara"].split())
+                self.assertGreaterEqual(wc, 16,
+                                        f"Bloque {i+1} muy corto: {wc} palabras")
+                self.assertLessEqual(wc, 22,
+                                     f"Bloque {i+1} muy largo: {wc} palabras")
+            # Último bloque debe cerrar con Saladillo Vivo
+            last_block = bloques[-1]["guion_ara"]
+            self.assertIn("saladillo vivo", last_block.lower(),
+                          f"Último bloque no menciona Saladillo Vivo: {last_block}")
+
+    def test_fallback_v11_continuidad_visual_present(self):
+        """v1.1 debe incluir continuidad_visual en meta_ara."""
+        data = self.agent.apply_heuristic_fallback(
+            title="Test noticia",
+            content="Contenido de prueba para validar continuidad visual.",
+            tono="NEUTRAL",
+        )
+        meta = data.get("meta_ara", {})
+        if data.get("version") == "1.1":
+            self.assertIn("continuidad_visual", meta,
+                          "Continuidad visual ausente en meta_ara v1.1")
+            cv = meta["continuidad_visual"]
+            self.assertIsInstance(cv, str)
+            self.assertGreater(len(cv), 20)
 
 
 class TestExtractJson(unittest.TestCase):

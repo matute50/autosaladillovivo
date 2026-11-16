@@ -41,8 +41,10 @@ export function PilotoDashboard() {
               <Switch
                 checked={settings?.piloto_automatico_activo ?? true}
                 onCheckedChange={(v) => {
-                  setPilotoActive(v)
-                  updateSettings({ piloto_automatico_activo: v })
+                  setPilotoActive(v);
+                                    if (settings) {
+                                      updateSettings({ ...{ piloto_automatico_activo: v }, id: settings.id } as any);
+                                    }
                 }}
               />
               {(settings?.piloto_automatico_activo ?? true) ? (

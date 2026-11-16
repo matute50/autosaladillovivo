@@ -7,6 +7,7 @@ import { useVolumeStore } from '@/store/useVolumeStore';
 import { Video, Article } from '@/lib/types';
 import { categoryMappings, type CategoryMapping } from '@/lib/categoryMappings';
 import { cleanTitle, shuffleArray } from '@/lib/utils';
+import CategoryCycler from '../layout/CategoryCycler';
 
 interface TvContentRailProps {
   searchResults: Video[];
@@ -93,7 +94,11 @@ const TvContentRail: React.FC<TvContentRailProps> = ({ searchResults, isSearchin
       const rawAudio = newsItem.audio_url || newsItem.audioUrl || newsItem.audioSourceUrl || newsItem.audioSourceUrl || (newsItem.audio ? newsItem.audio.url : undefined);
       const audioUrl = getProcessedAudioUrl(rawAudio);
       const urlSlide = newsItem.url_slide || newsItem.urlSlide;
-      
+
+      // Duración = la real del audio (animation_duration en DB, = locución + 1s de cola).
+      // Si viene vacía (artículos viejos), 0: el reproductor espera el fin del audio.
+      const duration = newsItem.animation_duration || newsItem.duration || 0;
+
       // Check if it's an HTML slide
       const isHtmlSlide = urlSlide && urlSlide.endsWith('.html');
       
@@ -122,7 +127,7 @@ const TvContentRail: React.FC<TvContentRailProps> = ({ searchResults, isSearchin
           novedad: false // Added to satisfy SlideMedia interface
         }, volume, setVolume);
       } else {
-        playSpecificVideo(item as Video, volume, setVolume);
+        playSpecificVideo(item as unknown as Video, volume, setVolume);
       }
     }
 
@@ -155,7 +160,7 @@ const TvContentRail: React.FC<TvContentRailProps> = ({ searchResults, isSearchin
   const activeCategory = useMemo(() => {
     if (availableCategoryMappings.length === 0) return undefined;
     return availableCategoryMappings[categoryIndex];
-  }, [activeCategoryMappings, categoryIndex]);
+  }, [availableCategoryMappings, categoryIndex]);
 
   const rawItems = useMemo(() => {
     return activeCategory ? (activeCategory.dbCategory === '__NOTICIAS__' ? allNews : galleryVideos) : [];

@@ -68,7 +68,8 @@ const CustomControls: React.FC<CustomControlsProps> = ({ onToggleFullScreen, isF
             step={0.01}
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
-            onInput={handleVolumeChange} // Para respuesta inmediata en algunos navegadores
+            // onInput eliminado: onChange cubre el evento en range inputs HTML5;
+            // onInput espera InputEventHandler y provocaba error TS 2322.
             onClick={(e) => e.stopPropagation()} // Vital para no pausar el video al arrastrar
             className="
               w-20 h-1 

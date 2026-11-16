@@ -1,29 +1,50 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
-// GET /api/factory/settings
 export async function GET() {
-  const supabase = await createSupabaseServerClient()
-  const { data, error } = await supabase
-    .from('video_factory_settings')
-    .select('*')
+  try {
+    const supabase = createSupabaseAdminClient()
+    const { data, error } = await supabase
+      .from('video_factory_settings')
+      .select('*')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  // The table is constrained to a single row; return as array
-  return NextResponse.json(data ?? [])
+    if (error) {
+      console.error('[SETTINGS_GET_ERROR]', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json(data ?? [])
+  } catch (e: any) {
+    console.error('[SETTINGS_GET_CRASH]', e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
 }
 
-// PATCH /api/factory/settings
 export async function PATCH(request: Request) {
-  const body = await request.json()
-  const supabase = await createSupabaseServerClient()
+  try {
+    const body = await request.json()
+    const { id, ...updates } = body
 
-  const { data, error } = await supabase
-    .from('video_factory_settings')
-    .update(body)
-    .select()
-    .single()
+    if (!id) {
+      return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json(data)
+    const supabase = createSupabaseAdminClient()
+    
+    const { data, error } = await supabase
+      .from('video_factory_settings')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[SETTINGS_PATCH_ERROR]', error)
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+
+    return NextResponse.json(data)
+  } catch (e: any) {
+    console.error('[SETTINGS_PATCH_CRASH]', e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
 }

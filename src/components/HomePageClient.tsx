@@ -40,7 +40,7 @@ const HomePageClient = ({ initialData }: { initialData: PageData }) => {
 
   // Prioridad 1: Modo TV (si está activo, gana a todo)
   if (viewMode === 'tv') {
-    return <TvModeLayout resumenId={resumenId} />;
+    return <TvModeLayout />;
   }
 
   // Prioridad 2: SIEMPRE Desktop

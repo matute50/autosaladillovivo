@@ -260,7 +260,7 @@ export const usePlayerStore = create<PlayerState>()(
                 const restoredVolume = savedVolume > 0 ? savedVolume : 0.7;
                 set({ historyVolume: restoredVolume });
 
-                console.log('[usePlayerStore] handleOnEnded — isPostNewsMusical:', get().isPostNewsMusical, 'savedVideo:', get().savedVideo ? get().savedVideo.id : 'null');
+                console.log('[usePlayerStore] handleOnEnded — isPostNewsMusical:', get().isPostNewsMusical, 'savedVideo:', (() => { const sv = get().savedVideo; return sv ? sv.id : 'null'; })());
 
                 // Post-news musical phase: resume the original paused video
                 if (get().isPostNewsMusical && get().savedVideo) {

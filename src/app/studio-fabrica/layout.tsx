@@ -6,14 +6,7 @@ export default async function StudioFabricaLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createSupabaseServerClient()
-  const { data: { session } } = await supabase.auth.getSession()
-
-  if (!session) {
-    // Get the callback URL from the request — defaults to /studio-fabrica
-    const url = new URL(`http://localhost${'/studio-fabrica'}`)
-    redirect(`/studio-fabrica/login?next=${encodeURIComponent(url.pathname + url.search)}`)
-  }
-
+  // Auth is handled by middleware.ts for route protection
+  // This layout just renders children
   return <>{children}</>
 }

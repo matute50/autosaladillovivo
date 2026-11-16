@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createSupabaseServerClient } from '@/lib/supabase/server'
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
 // GET /api/locations
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const presenterId = searchParams.get('presenter_id') || undefined
 
-  const supabase = await createSupabaseServerClient()
+  const supabase = createSupabaseAdminClient()
 
   let query = supabase.from('video_locations').select('*').order('nombre')
   if (presenterId) {
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 // POST /api/locations
 export async function POST(request: Request) {
   const body = await request.json()
-  const supabase = await createSupabaseServerClient()
+  const supabase = createSupabaseAdminClient()
 
   const { data, error } = await supabase
     .from('video_locations')

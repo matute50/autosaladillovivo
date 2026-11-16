@@ -233,17 +233,27 @@ const VideoSection: React.FC = () => {
         audioRef.current.volume = isMuted ? 0 : (isHtmlSlideActive ? 1 : targetVolume);
         // Solo reasignar src si es DIFERENTE al actual.
         // Re-asignar el mismo src resetea el elemento en algunos navegadores y dispara onEnded prematuro.
-        if (audioRef.current.src !== audioUrl) {
+        // Normalizar ambas URLs evita falsos positivos por diferencias de encoding o trailing-slash.
+        let srcNeedsUpdate = false;
+        try {
+          const normalizedCurrent = audioRef.current.src ? new URL(audioRef.current.src).href : '';
+          const normalizedTarget = new URL(audioUrl).href;
+          srcNeedsUpdate = normalizedCurrent !== normalizedTarget;
+        } catch {
+          srcNeedsUpdate = audioRef.current.src !== audioUrl;
+        }
+        if (srcNeedsUpdate) {
           console.log('[AudioSync] Cambiando src a:', audioUrl.slice(-60));
           audioRef.current.src = audioUrl;
           hasStartedAudioRef.current = false; // Nuevo src = nuevo ciclo de reproducción
         }
-        // Solo llamar play() si no estaba sonando ya este src
-        if (!hasStartedAudioRef.current || audioRef.current.paused) {
+        // Solo llamar play() si: nunca se inició este src, el audio está pausado, o cambió el src recientemente.
+        if (!hasStartedAudioRef.current || audioRef.current.paused || srcNeedsUpdate) {
           console.log('[AudioSync] Llamando play() — isNewsSlide:', isNewsSlide, 'hasStartedAudio:', hasStartedAudioRef.current, 'paused:', audioRef.current.paused);
           hasStartedAudioRef.current = true;
           audioRef.current.play().catch((err) => {
             console.warn("[VideoSection] Play audio noticia:", err);
+            hasStartedAudioRef.current = false;
           });
         } else {
           console.log('[AudioSync] Audio ya reproduciendo, no se llama play()');
