@@ -541,6 +541,127 @@ class AudioGeneratorAgent:
                 continue
         return None
 
+    def _ffmpeg_concat_with_pause(self, body_bytes: bytes, closing_bytes: bytes, pause_ms: int = 1000) -> Optional[bytes]:
+        """Concatena cuerpo + silencio exacto + promo usando ffmpeg (independiente de pydub/audioop).
+
+        ffmpeg funciona en Python 3.14 (donde 'audioop' fue removido y pydub se rompe),
+        por lo que este es el método MÁS fiable del pipeline para armar el MP3 final.
+        """
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        if not body_bytes or not closing_bytes:
+            return None
+
+        ffmpeg = 'ffmpeg'
+        if not self._ffmpeg_exists(ffmpeg):
+            return None
+
+        tmpdir = None
+        try:
+            tmpdir = tempfile.mkdtemp(prefix="sv_audio_")
+            body_path = os.path.join(tmpdir, "body.mp3")
+            promo_path = os.path.join(tmpdir, "promo.mp3")
+            out_path = os.path.join(tmpdir, "joined.mp3")
+            with open(body_path, "wb") as f:
+                f.write(body_bytes)
+            with open(promo_path, "wb") as f:
+                f.write(closing_bytes)
+
+            pause_sec = pause_ms / 1000.0
+            # body + pause(silencio) + promo, concatenados con exactamente pause_ms de silencio.
+            cmd = [
+                ffmpeg, '-y',
+                '-i', body_path,
+                '-i', promo_path,
+                '-filter_complex',
+                f"[1:a]adelay={pause_ms}|{pause_ms}[promo_delayed];[0:a][promo_delayed]concat=n=2:v=0:a=1[out]",
+                '-map', '[out]',
+                '-c:a', 'libmp3lame', '-b:a', '128k',
+                out_path
+            ]
+            # Nota: usamos adelay sobre la promo (empieza a sonar tras la pausa).
+            # El cuerpo ocupa los primeros pause_ms silenciosos si es más corto que la pausa,
+            # pero en la práctica el cuerpo dura mucho más que 1s, así que no se solapan.
+            proc = subprocess.run(cmd, capture_output=True, timeout=60)
+            if proc.returncode != 0 or not os.path.exists(out_path):
+                logger.warning(f"ffmpeg concat falló: {proc.stderr.decode()[:300]}")
+                return None
+            with open(out_path, "rb") as f:
+                data = f.read()
+            if len(data) > 1000:
+                logger.info(
+                    f"  [AudioGeneratorAgent] ffmpeg concat OK: cuerpo + {pause_ms}ms silencio + promo "
+                    f"({len(data)} bytes)"
+                )
+                return data
+            return None
+        except Exception as e:
+            logger.warning(f"ffmpeg concat excepción: {e}")
+            return None
+        finally:
+            if tmpdir:
+                try:
+                    import shutil
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _ffmpeg_exists(ffmpeg: str = 'ffmpeg') -> bool:
+        """Verifica si ffmpeg está disponible en el sistema."""
+        import shutil
+        if shutil.which(ffmpeg):
+            return True
+        for alt in ('/home/matias/.hermes/tools/ffmpeg-9.0.1-linux-x64/bin/ffmpeg',
+                    '/usr/bin/ffmpeg'):
+            if os.path.exists(alt):
+                return True
+        return False
+
+    def _ffprobe_duration(self, audio_bytes: bytes) -> Optional[float]:
+        """Mide la duración real de un audio (en segundos) usando ffprobe (sin pydub)."""
+        import subprocess
+        import tempfile
+        import shutil
+
+        if not audio_bytes:
+            return None
+        ffprobe = shutil.which('ffprobe')
+        if not ffprobe:
+            for alt in ('/home/matias/.hermes/tools/ffmpeg-9.0.1-linux-x64/bin/ffprobe',
+                        '/usr/bin/ffprobe'):
+                if os.path.exists(alt):
+                    ffprobe = alt
+                    break
+        if not ffprobe:
+            return None
+
+        tmpdir = None
+        try:
+            tmpdir = tempfile.mkdtemp(prefix="sv_audur_")
+            p = os.path.join(tmpdir, "a.mp3")
+            with open(p, "wb") as f:
+                f.write(audio_bytes)
+            proc = subprocess.run(
+                [ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', p],
+                capture_output=True, timeout=30
+            )
+            if proc.returncode == 0:
+                return float(proc.stdout.decode().strip())
+            return None
+        except Exception:
+            return None
+        finally:
+            if tmpdir:
+                try:
+                    import shutil as _sh
+                    _sh.rmtree(tmpdir, ignore_errors=True)
+                except Exception:
+                    pass
+
     @staticmethod
     def _leading_silence_ms(seg) -> int:
         from pydub.silence import detect_leading_silence
@@ -628,7 +749,17 @@ class AudioGeneratorAgent:
             return None
 
     def _join_with_pause(self, body_bytes: bytes, closing_bytes: bytes, pause_ms: int = 1000) -> Optional[bytes]:
-        """Une dos audios separados con un silencio exacto (fallback de doble sintesis)."""
+        """Une dos audios separados con un silencio exacto.
+
+        Prioriza ffmpeg (funciona en Python 3.14 sin pydub/audioop).
+        Si no hay ffmpeg, cae a pydub.
+        """
+        # Método principal: ffmpeg (robusto en py3.14)
+        ffmpeg_result = self._ffmpeg_concat_with_pause(body_bytes, closing_bytes, pause_ms)
+        if ffmpeg_result:
+            return ffmpeg_result
+
+        # Fallback: pydub (solo funciona si pydub+audioop están disponibles)
         if not HAS_PYDUB or not body_bytes or not closing_bytes:
             return None
         try:
@@ -673,35 +804,50 @@ class AudioGeneratorAgent:
         logger.info(f"  [AudioGeneratorAgent] [Paso 4: Generando Audio] ID: {article_id} | Caracteres: {len(body_speech)} | VOZ: {voice}")
         logger.info(f'  [AudioGeneratorAgent] Frase institucional de cierre: "{closing_phrase}"')
 
-        # Sintesis CONTINUA noticia + promo en UNA sola corrida del motor: esto
-        # garantiza que la MISMA voz, con el mismo tono, ritmo, enfasis y energia
-        # diga la frase institucional (evita que cuerpo y promo caigan en motores
-        # o voces distintas). Luego se normaliza el silencio del empalme a 1,000 ms.
+        # ─── ESTRATEGIA PRINCIPAL: DOBLE SÍNTESIS (robusta y determinista) ───
+        # Sintetizamos cuerpo y promo POR SEPARADO con la MISMA voz/motor,
+        # luego unimos con exactamente 1000 ms de silencio.
+        # Esto garantiza que la frase promocional SIEMPRE se incluya y con la
+        # pausa exacta, evitando fallos de detección de silencios en síntesis continua.
         closing_text = closing_phrase
-        combined_speech = f"{body_speech} {closing_text}"
+        
+        # 1. Sintetizar cuerpo de la noticia
+        body_audio = self.text_to_speech(body_speech, voice=voice)
+        if not body_audio:
+            logger.error(f"  [AudioGeneratorAgent] Falló síntesis del cuerpo para artículo {article_id}")
+            return None
+        
+        # 2. Sintetizar frase promocional con el MISMO motor que funcionó para el cuerpo
+        engine_cuerpo = getattr(self, '_last_engine', None)
+        closing_audio = self.text_to_speech(closing_text, voice=voice, prefer_engine=engine_cuerpo)
+        
+        # 3. Unir con pausa exacta de 1000 ms
         audio_bytes = None
-        combined_audio = self.text_to_speech(combined_speech, voice=voice)
-        if combined_audio:
-            audio_bytes = self._splice_exact_pause(combined_audio, pause_ms=1000)
-            if audio_bytes is None:
-                logger.info("  [AudioGeneratorAgent] Splice continuo no disponible; armo con doble sintesis de respaldo.")
+        if closing_audio:
+            audio_bytes = self._join_with_pause(body_audio, closing_audio, pause_ms=1000)
+            if audio_bytes:
+                logger.info(f"  [AudioGeneratorAgent] ✅ Audio ensamblado: cuerpo + 1s pausa + promo (motor: {engine_cuerpo})")
+            else:
+                logger.warning("  [AudioGeneratorAgent] _join_with_pause falló; intentando síntesis continua como fallback...")
+        else:
+            logger.warning("  [AudioGeneratorAgent] Falló síntesis de la promo; intentando síntesis continua como fallback...")
 
-        # Fallback: si la sintesis continua o el splice fallaron, generar por separado
-        # con la MISMA voz y SIN tono institucional (para no despegar la promo).
+        # ─── FALLBACK: Síntesis continua + splice (menos fiable) ───
         if audio_bytes is None:
-            body_audio = self.text_to_speech(body_speech, voice=voice)
-            if not body_audio:
-                return None
-            # Forzar en la promo el MISMO motor que funcionó para el cuerpo: así
-            # la voz de la frase institucional no cambia aunque el rotador de keys
-            # haya agotado Gemini justo en la segunda llamada.
-            engine_cuerpo = getattr(self, '_last_engine', None)
-            closing_audio = self.text_to_speech(closing_text, voice=voice, prefer_engine=engine_cuerpo)
-            if closing_audio:
-                audio_bytes = self._join_with_pause(body_audio, closing_audio, pause_ms=1000)
-            if audio_bytes is None:
-                audio_bytes = body_audio
-                logger.warning("  [AudioGeneratorAgent] No se pudo anexar la frase de cierre; se publica solo el cuerpo.")
+            logger.info("  [AudioGeneratorAgent] Fallback: síntesis continua noticia+promo en una sola llamada...")
+            combined_speech = f"{body_speech} {closing_text}"
+            combined_audio = self.text_to_speech(combined_speech, voice=voice)
+            if combined_audio:
+                audio_bytes = self._splice_exact_pause(combined_audio, pause_ms=1000)
+                if audio_bytes:
+                    logger.info("  [AudioGeneratorAgent] ✅ Fallback continuo OK")
+                else:
+                    logger.warning("  [AudioGeneratorAgent] Splice continuo falló; usando solo cuerpo SIN promo como último recurso")
+        
+        # ─── ÚLTIMO RECURSO: solo cuerpo (NUNCA debería llegar aquí en condiciones normales) ───
+        if audio_bytes is None:
+            audio_bytes = body_audio
+            logger.error(f"  [AudioGeneratorAgent] ⚠️ CRÍTICO: Se publica SOLO el cuerpo sin frase promocional para artículo {article_id}")
 
         # Optimizar audio (normalizar, filtrar, MP3 128kbps)
         audio_bytes = self.optimize_audio(audio_bytes)
@@ -709,12 +855,12 @@ class AudioGeneratorAgent:
         # Duración REAL del audio final (incluye pausa de 1s + frase institucional).
         # El orquestador la usa para que el slide dure exactamente lo que dura
         # la locución, y así suene siempre completa hasta el final.
-        try:
-            _seg = self._bytes_to_segment(audio_bytes)
-            self.last_audio_duration = len(_seg) / 1000.0
+        dur = self._ffprobe_duration(audio_bytes)
+        if dur:
+            self.last_audio_duration = dur
             logger.info(f"  [AudioGeneratorAgent] Duración final del audio: {self.last_audio_duration:.1f}s")
-        except Exception as e:
-            logger.warning(f"  [AudioGeneratorAgent] No se pudo medir duración: {e}")
+        else:
+            logger.warning("  [AudioGeneratorAgent] No se pudo medir duración (ffprobe no disponible)")
             self.last_audio_duration = None
 
         # Subir a Supabase Storage
