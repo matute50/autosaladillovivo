@@ -127,7 +127,7 @@ INSERT INTO public.video_presenters (slug, nombre, flow_character_alias, destino
   quemar_zocalo_ffmpeg, voz_descripcion_fija, look_modo, look_manual_prompt)
 VALUES
   ('ara', 'Ara', '@Ara', 'redes', '9:16', true, 'Veo 3.1 - Lite', 1, true, false, true,
-   'Mujer joven, tez clara, cabello negro largo recogido en cola baja, blazer azul marino sobre blusa blanca, maquillaje natural y profesional, acento rioplatense porteño suave, expresión cercana y expresiva',
+   'Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema/clip), vestimenta casual (jeans y campera liviana), maquillaje natural, acento rioplatense porteño suave, expresión cercana y expresiva',
    'auto', NULL),
   ('futbol', 'Presentador Fútbol', '@Futbol', 'vmix', '16:9', false, 'Veo 3.1 - Lite', 1, false, true, false,
    'Hombre adulto, traje formal oscuro, camisa blanca, corbata azul, acento rioplatense neutro, expresión seria y profesional',

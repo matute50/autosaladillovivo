@@ -292,7 +292,7 @@ CONTINUIDAD_VISUAL (meta_ara):
 - Incluir: vestimenta exacta (colores, tipo de prenda), rasgos faciales, peinado, maquillaje sutil.
 - Incluir: iluminación natural diurna, posición de la luz.
 - Incluir: locación específica en el centro de Saladillo (calle, plaza, edificio recognizable).
-- Ejemplo: "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino sobre blusa blanca, maquillaje natural, iluminación natural frontal desde la izquierda, locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo."
+- Ejemplo: "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, vestimenta casual (jeans y remera/campera liviana), maquillaje natural, iluminación natural frontal desde la izquierda, locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo."
 
 TONO_VOCAL: Siempre FEMENINA joven, clara.
 EXPRESION_INICIO/DESARROLLO/CIERRE: Solo gestos y miradas, NUNCA palabras habladas entre comillas.
@@ -990,8 +990,8 @@ RESPONDE ÚNICAMENTE CON EL JSON VÁLIDO. Sin explicaciones, sin markdown, sin c
                 "ritmo_camara": "micro_acercamiento_suave",
                 "requiere_aprobacion_sensible": tenor == 'sensible_luto',
                 "continuidad_visual": (
-                    "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino "
-                    "sobre blusa blanca, maquillaje natural, iluminación natural frontal desde la izquierda, "
+                    "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, "
+                    "vestimenta casual (jeans y remera o campera liviana), maquillaje natural, iluminación natural frontal desde la izquierda, "
                     "locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo"
                 ),
             },

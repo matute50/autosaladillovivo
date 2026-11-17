@@ -210,7 +210,7 @@ class TestAraValidation(unittest.TestCase):
                 "ambiente_sonoro": "Sonido de calle céntrica",
                 "ritmo_camara": "plano_fijo_estable",
                 "requiere_aprobacion_sensible": False,
-                "continuidad_visual": "Periodista femenino profesional, vestimenta blazer azul marino, cabello recogido, luz natural diurna, locación centro de Saladillo plaza principal",
+                "continuidad_visual": "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema/clip), vestimenta casual (jeans y campera liviana), maquillaje natural, mirada serena, luz natural diurna, locación centro de Saladillo plaza principal",
             },
         }
 
