@@ -7,13 +7,12 @@ import { useAuth } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Video, Users, Cloud, MonitorPlay, LogOut } from 'lucide-react'
 
-type TabId = 'piloto' | 'presentadores' | 'clima' | 'inspector'
+type TabId = 'piloto' | 'presentadores' | 'clima'
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode; href: string }[] = [
   { id: 'piloto', label: 'Piloto Automático', icon: <MonitorPlay className="w-4 h-4" />, href: '/studio-fabrica/piloto' },
   { id: 'presentadores', label: 'Presentadores', icon: <Users className="w-4 h-4" />, href: '/studio-fabrica/presentadores' },
   { id: 'clima', label: 'Clima', icon: <Cloud className="w-4 h-4" />, href: '/studio-fabrica/clima' },
-  { id: 'inspector', label: 'Inspector', icon: <Video className="w-4 h-4" />, href: '/studio-fabrica/inspector' },
 ]
 
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
