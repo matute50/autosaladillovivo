@@ -1,12 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/forms'
 import { Badge } from '@/components/ui/forms'
 import { Switch } from '@/components/studio/Switch'
 import { AlertTriangle, CheckCircle2, XCircle, Video, Image as ImageIcon, FileText } from 'lucide-react'
+
+interface VigenteArticle {
+  id: number
+  title: string
+  slug: string
+  created_at: string
+}
 
 export default function InspectorPage() {
   const [articleId, setArticleId] = useState('')
@@ -20,16 +27,30 @@ export default function InspectorPage() {
   const [job, setJob] = useState<any>(null)
   const [promptImagen, setPromptImagen] = useState('')
   const [loadingJob, setLoadingJob] = useState(false)
+  const [vigentes, setVigentes] = useState<VigenteArticle[]>([])
+  const [loadingVigentes, setLoadingVigentes] = useState(true)
 
-  async function loadJob() {
-    const id = Number(articleId)
-    if (!id || !Number.isInteger(id) || id <= 0) {
+  useEffect(() => {
+    fetch('/api/factory/articles/vigentes')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.articles)) {
+          setVigentes(data.articles)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingVigentes(false))
+  }, [])
+
+  async function loadJob(id?: number) {
+    const articleIdNum = id ?? Number(articleId)
+    if (!articleIdNum || !Number.isInteger(articleIdNum) || articleIdNum <= 0) {
       setJob(null); setPromptImagen(''); return
     }
     setLoadingJob(true)
     setJob(null)
     try {
-      const res = await fetch(`/api/factory/master-image?articleId=${id}`)
+      const res = await fetch(`/api/factory/master-image?articleId=${articleIdNum}`)
       const data = await res.json()
       if (data.success && data.job) {
         setJob(data.job)
@@ -94,9 +115,41 @@ export default function InspectorPage() {
               onChange={(e) => setArticleId(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && loadJob()}
             />
-            <Button variant="outline" onClick={loadJob} disabled={loadingJob}>Buscar</Button>
+            <Button variant="outline" onClick={() => loadJob()} disabled={loadingJob}>Buscar</Button>
           </div>
           {loadingJob && <p className="text-sm text-muted-foreground mt-1">Cargando...</p>}
+        </CardContent>
+      </Card>
+
+      {/* Vigentes articles list */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="w-4 h-4" /> Noticias Vigentes ({vigentes.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingVigentes ? (
+            <p className="text-sm text-muted-foreground">Cargando noticias...</p>
+          ) : vigentes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay noticias vigentes con ara_json.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {vigentes.map((art) => (
+                <button
+                  key={art.id}
+                  onClick={() => {
+                    setArticleId(String(art.id))
+                    loadJob(art.id)
+                  }}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-sm"
+                >
+                  <span className="font-mono font-semibold text-primary">#{art.id}</span>
+                  <span className="max-w-[200px] truncate">{art.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
