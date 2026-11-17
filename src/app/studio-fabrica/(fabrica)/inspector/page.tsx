@@ -68,31 +68,42 @@ export default function InspectorPage() {
   }
 
   async function regenerateImage() {
+    console.log('[DEBUG] regenerateImage clicked, articleId state:', JSON.stringify(articleId), typeof articleId)
     const id = Number(articleId)
+    console.log('[DEBUG] parsed id:', id, 'is integer:', Number.isInteger(id), 'valid:', !!id && Number.isInteger(id) && id > 0)
     if (!id || !Number.isInteger(id) || id <= 0) {
+      console.warn('[DEBUG] validate failed, setting error status')
       setStatus({ kind: 'err', msg: 'Ingresá un ID de noticia válido antes de regenerar.' })
       return
     }
+    console.log('[DEBUG] setting loading=true, status=info')
     setLoading(true)
     setStatus({ kind: 'info', msg: `Encolando imagen maestra para la noticia ${id}...` })
     try {
+      console.log('[DEBUG] fetching POST /api/factory/master-image with articleId:', id)
       const res = await fetch('/api/factory/master-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ articleId: id }),
       })
+      console.log('[DEBUG] response status:', res.status, 'headers:', Object.fromEntries(res.headers.entries()))
       const data = await res.json()
+      console.log('[DEBUG] response data:', JSON.stringify(data).substring(0, 200))
       if (!res.ok || !data.success) {
+        console.warn('[DEBUG] request failed:', data.error)
         setStatus({ kind: 'err', msg: data.error || 'No se pudo encolar la imagen.' })
       } else {
+        console.log('[DEBUG] success! jobID:', data.jobId)
         setStatus({
           kind: 'ok',
           msg: `Imagen maestra encolada (job #${data.jobId}). El worker la genera con Nano Banana 2 Lite y la sube a Storage.`,
         })
       }
     } catch (e: any) {
+      console.error('[DEBUG] catch block:', e)
       setStatus({ kind: 'err', msg: e?.message || 'Error de red al encolar la imagen.' })
     } finally {
+      console.log('[DEBUG] finally: setting loading=false')
       setLoading(false)
     }
   }
