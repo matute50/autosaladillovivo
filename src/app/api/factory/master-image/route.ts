@@ -2,9 +2,45 @@ import { NextResponse } from 'next/server'
 import { createSupabaseAdminClient } from '@/lib/supabase/admin'
 
 /**
+ * GET /api/factory/master-image?articleId=N
+ * Devuelve el job de imagen maestra asociado a una noticia (si existe).
+ */
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url)
+    const articleId = Number(url.searchParams.get('articleId'))
+
+    if (!articleId || !Number.isInteger(articleId) || articleId <= 0) {
+      return NextResponse.json({ success: false, error: 'articleId inválido' }, { status: 400 })
+    }
+
+    const supabase = createSupabaseAdminClient()
+
+    const { data, error } = await supabase
+      .from('ara_video_jobs')
+      .select('id, article_id, tipo, estado, master_image_url, prompt_imagen, updated_at')
+      .eq('article_id', articleId)
+      .eq('tipo', 'imagen')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[MASTER_IMAGE_QUERY_ERROR]', error)
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true, job: data ?? null })
+  } catch (e: any) {
+    console.error('[MASTER_IMAGE_CRASH]', e)
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 })
+  }
+}
+
+/**
+ * POST /api/factory/master-image  body { articleId: number }
  * Encola un trabajo de "imagen maestra" (tipo='imagen') en ara_video_jobs.
  * El worker de Python lo toma con --image / modo poll.
- * Método: POST  body { articleId: number }
  */
 export async function POST(request: Request) {
   try {

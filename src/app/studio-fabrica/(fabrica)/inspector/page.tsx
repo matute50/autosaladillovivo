@@ -17,6 +17,34 @@ export default function InspectorPage() {
   const [modeChroma] = useState(false)
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<{ kind: 'ok' | 'err' | 'info'; msg: string } | null>(null)
+  const [job, setJob] = useState<any>(null)
+  const [promptImagen, setPromptImagen] = useState('')
+  const [loadingJob, setLoadingJob] = useState(false)
+
+  async function loadJob() {
+    const id = Number(articleId)
+    if (!id || !Number.isInteger(id) || id <= 0) {
+      setJob(null); setPromptImagen(''); return
+    }
+    setLoadingJob(true)
+    setJob(null)
+    try {
+      const res = await fetch(`/api/factory/master-image?articleId=${id}`)
+      const data = await res.json()
+      if (data.success && data.job) {
+        setJob(data.job)
+        setPromptImagen(data.job.prompt_imagen || '')
+      } else {
+        setJob(null)
+        setPromptImagen('')
+      }
+    } catch {
+      setJob(null)
+      setPromptImagen('')
+    } finally {
+      setLoadingJob(false)
+    }
+  }
 
   async function regenerateImage() {
     const id = Number(articleId)
@@ -64,9 +92,11 @@ export default function InspectorPage() {
               className="max-w-xs"
               value={articleId}
               onChange={(e) => setArticleId(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && loadJob()}
             />
-            <Button variant="outline">Buscar</Button>
+            <Button variant="outline" onClick={loadJob} disabled={loadingJob}>Buscar</Button>
           </div>
+          {loadingJob && <p className="text-sm text-muted-foreground mt-1">Cargando...</p>}
         </CardContent>
       </Card>
 
@@ -144,16 +174,37 @@ export default function InspectorPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="relative aspect-[9/16] bg-muted rounded-lg overflow-hidden max-w-[280px] mx-auto">
-                <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
-                  Imagen maestra aún no generada
-                </div>
-                {!modeChroma && (
-                  <div className="absolute bottom-0 left-0 right-0 h-[20%] bg-black/30 flex items-end p-2">
-                    <span className="text-white text-xs font-medium drop-shadow">Zona segura del zócalo (20% inferior)</span>
+              <div className="relative aspect-[9/16] bg-muted rounded-lg overflow-hidden max-w-[280px] mx-auto min-h-[200px] flex items-center justify-center">
+                {job?.master_image_url ? (
+                  <>
+                    <img
+                      src={job.master_image_url}
+                      alt="Imagen maestra"
+                      className="absolute inset-0 w-full h-full object-cover rounded-lg"
+                    />
+                    {!modeChroma && (
+                      <div className="absolute bottom-0 left-0 right-0 h-[20%] bg-black/30 flex items-end p-2">
+                        <span className="text-white text-xs font-medium drop-shadow">Zona segura del zócalo (20% inferior)</span>
+                      </div>
+                    )}
+                  </>
+                ) : loadingJob ? (
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                    <span className="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                    Cargando...
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center text-muted-foreground text-sm text-center px-4">
+                    {articleId ? 'Sin imagen maestra generada aún' : 'Ingresá un ID y buscá'}
                   </div>
                 )}
               </div>
+              {job?.estado === 'generando_imagen' && (
+                <p className="text-xs text-yellow-600 mt-2">Generando imagen...</p>
+              )}
+              {job?.estado === 'imagen_lista' && (
+                <p className="text-xs text-green-600 mt-2">✓ Imagen lista en Storage</p>
+              )}
             </CardContent>
           </Card>
 
@@ -166,7 +217,7 @@ export default function InspectorPage() {
               <div>
                 <p className="font-semibold text-muted-foreground mb-1">Prompt imagen maestra:</p>
                 <code className="block p-2 bg-muted rounded text-wrap break-all">
-                  Young woman journalist with natural curly black hair, styled up in different ways with hair accessories, navy blazer over white blouse, natural and professional makeup, warm rioplatense accent, close and expressive look...
+                  {promptImagen || (loadingJob ? 'Cargando...' : 'Young woman journalist with natural curly black hair...')}
                 </code>
               </div>
               <div>
