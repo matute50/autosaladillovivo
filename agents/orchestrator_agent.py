@@ -38,7 +38,6 @@ from .article_ledger import (
 )
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
-from .ara_script_agent import AraScriptAgent
 from .audio_generator_agent import AudioGeneratorAgent
 from .slide_generator_agent import SlideGeneratorAgent
 from .publisher_agent import PublisherAgent
@@ -125,7 +124,6 @@ class OrchestratorAgent:
         1. Scraping (ScraperAgent)
         2. Guardar en Base de Datos como Borrador (StorageAgent)
         3. Modificar Título y Texto con IA (AiRewriterAgent)
-        3.5. Generar guiones estilo Ara (AraScriptAgent) — JSON jsonb en ara_json
         4. Generar y optimizar audio locutado (AudioGeneratorAgent)
         5. Guardar en Base de Datos con IA, Audio y Slides (StorageAgent)
         6. Publicar Oficialmente en Base de Datos (PublisherAgent)
@@ -166,7 +164,7 @@ class OrchestratorAgent:
         # ----------------------------------------------------------------------
         # PASO 1: SCRAPING
         # ----------------------------------------------------------------------
-        logger.info("📰 [PASO 1/6] ScraperAgent: Extrayendo noticias locales...")
+        logger.info("📰 [PASO 1] ScraperAgent: Extrayendo noticias locales...")
         scraped_articles = self.scraper_agent.scrape_all(
             limit_per_source=self.limit_per_source,
             existing_hashes=existing_hashes
@@ -186,12 +184,12 @@ class OrchestratorAgent:
             logger.info(f"🔁 Se encontraron {len(pending_db)} artículos en borrador para continuar el flujo.")
             articles_to_process = pending_db
         else:
-            logger.info(f"✅ [PASO 1/6] Scraping finalizado: {len(scraped_articles)} artículos nuevos extraídos.")
+            logger.info(f"✅ [PASO 1] Scraping finalizado: {len(scraped_articles)} artículos nuevos extraídos.")
 
             # ------------------------------------------------------------------
             # PASO 2: GUARDAR EN BASE DE DATOS (BORRADOR) O ACTUALIZAR NOTA EXISTENTE
             # ------------------------------------------------------------------
-            logger.info("💾 [PASO 2/6] StorageAgent: Clasificando nuevas, actualizaciones y duplicados...")
+            logger.info("💾 [PASO 2] StorageAgent: Clasificando nuevas, actualizaciones y duplicados...")
 
             articles_to_process = []
             accepted, duplicate_articles, _ = classify_candidates(
@@ -217,9 +215,9 @@ class OrchestratorAgent:
                 time.sleep(0.5)
 
             if duplicate_articles:
-                logger.info(f"🔁 [PASO 2/6] Descartados como duplicados/ya tratados: {len(duplicate_articles)}.")
+                logger.info(f"🔁 [PASO 2] Descartados como duplicados/ya tratados: {len(duplicate_articles)}.")
 
-            logger.info(f"✅ [PASO 2/6] Artículos listos para procesar: {len(articles_to_process)}.")
+            logger.info(f"✅ [PASO 2] Artículos listos para procesar: {len(articles_to_process)}.")
 
             # ── Auditoría QA Paso 2 ── Verificar calidad de imágenes capturadas
             if self.qa:
@@ -251,7 +249,7 @@ class OrchestratorAgent:
         # ----------------------------------------------------------------------
         # PASO 3: MODIFICAR TÍTULO Y TEXTO CON IA
         # ----------------------------------------------------------------------
-        logger.info("🤖 [PASO 3/6] AiRewriterAgent: Reestructurando con IA Free-First (GLM/Gemini/OpenAI/Fallback)...")
+        logger.info("🤖 [PASO 3] AiRewriterAgent: Reestructurando con IA Free-First (GLM/Gemini/OpenAI/Fallback)...")
         modified_list = []
         for art in articles_to_process:
             ai_data = self.rewriter_agent.rewrite_article(art)
@@ -266,7 +264,7 @@ class OrchestratorAgent:
         with open(os.path.join(DATA_DIR, 'modified_articles.json'), 'w', encoding='utf-8') as f:
             json.dump(modified_list, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"✅ [PASO 3/6] Modificación con IA completada: {len(modified_list)} artículos listos.")
+        logger.info(f"✅ [PASO 3] Modificación con IA completada: {len(modified_list)} artículos listos.")
 
         # ── Auditoría QA Paso 3 ── Verificar resultados de reescritura IA
         if self.qa:
@@ -281,39 +279,11 @@ class OrchestratorAgent:
                     logger.warning(f"  [QA-Paso3] {art.get('titulo_ia','?')[:40]}... → {issues_str}")
 
         # ----------------------------------------------------------------------
-        # PASO 3.5: GENERAR JSON ESTILO ARA
-        # ----------------------------------------------------------------------
-        ara_agent = AraScriptAgent()
-        ara_generated = 0
-        ara_failed = 0
-        logger.info("🎬 [PASO 3.5/6] AraScriptAgent: generando guiones estilo Ara para cada noticia...")
-        for art in modified_list:
-            art_id = art.get('id')
-            # Solo generar si no tiene ara_json aún
-            has_ara = art.get('ara_json') or False
-            if has_ara:
-                continue  # Ya tiene Ara, saltar
-            ara_data = ara_agent.generate_ara_json(art)
-            if ara_data:
-                art['ara_json'] = ara_data
-                ara_generated += 1
-                # Guardar en BD inmediatamente para no perder el dato
-                upd = self.storage_agent.update_ara_json(art_id, ara_data)
-                if not upd:
-                    logger.warning(f"  [AraScriptAgent] No se pudo guardar ara_json ID={art_id} (columna ausente?)")
-                    ara_failed += 1
-            else:
-                logger.warning(f"  [AraScriptAgent] Falló generación Ara para '{art.get('title','?')[:40]}...'")
-                ara_failed += 1
-            time.sleep(0.8)
-        logger.info(f"✅ [PASO 3.5/6] Guiones Ara generados: {ara_generated} exitosos, {ara_failed} fallidos sobre {len(modified_list)}.")
-
-        # ----------------------------------------------------------------------
         # PASO 4: GENERACIÓN Y OPTIMIZACIÓN DE AUDIO
         # ----------------------------------------------------------------------
         audios_generated = 0
         if self.enable_audio:
-            logger.info("🎙️ [PASO 4/7] AudioGeneratorAgent: Generando locución en audio y subiendo a Storage...")
+            logger.info("🎙️ [PASO 4] AudioGeneratorAgent: Generando locución en audio y subiendo a Storage...")
             for art in modified_list:
                 art_id = art.get('id')
                 title = art.get('titulo_ia') or art.get('title')
@@ -335,16 +305,16 @@ class OrchestratorAgent:
                         art['audio_duration'] = round(_dur, 1)
                     audios_generated += 1
                 time.sleep(1.2)
-            logger.info(f"✅ [PASO 4/7] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
+            logger.info(f"✅ [PASO 4] Audios generados y alojados: {audios_generated}/{len(modified_list)} artículos.")
         else:
-            logger.info("ℹ️ [PASO 4/7] Generación de audio omitida por configuración.")
+            logger.info("ℹ️ [PASO 4] Generación de audio omitida por configuración.")
 
         # ----------------------------------------------------------------------
         # PASO 5: GENERACIÓN DE SLIDES CON VOZ RIOPLATENSE
         # ----------------------------------------------------------------------
         slides_generated = 0
         if self.enable_slides:
-            logger.info("🎬 [PASO 5/7] SlideGeneratorAgent: Generando slides dinámicos con fotos y voz rioplatense...")
+            logger.info("🎬 [PASO 5] SlideGeneratorAgent: Generando slides dinámicos con fotos y voz rioplatense...")
             for art in modified_list:
                 art_id = art.get('id')
                 title = art.get('titulo_ia') or art.get('title')
@@ -387,14 +357,14 @@ class OrchestratorAgent:
                     art['url_slide'] = slide_url
                     slides_generated += 1
                 time.sleep(1.5)
-            logger.info(f"✅ [PASO 5/7] Slides generados y subidos: {slides_generated}/{len(modified_list)} artículos.")
+            logger.info(f"✅ [PASO 5] Slides generados y subidos: {slides_generated}/{len(modified_list)} artículos.")
         else:
-            logger.info("ℹ️ [PASO 5/7] Generación de slides omitida por configuración.")
+            logger.info("ℹ️ [PASO 5] Generación de slides omitida por configuración.")
 
         # ----------------------------------------------------------------------
         # PASO 6: GUARDAR EN BASE DE DATOS (ACTUALIZAR CON IA, AUDIO Y SLIDE)
         # ----------------------------------------------------------------------
-        logger.info("🔄 [PASO 6/7] StorageAgent: Actualizando registros en Supabase con IA, audio y slides...")
+        logger.info("🔄 [PASO 6] StorageAgent: Actualizando registros en Supabase con IA, audio y slides...")
         updated_count = 0
         for art in modified_list:
             art_id = art.get('id')
