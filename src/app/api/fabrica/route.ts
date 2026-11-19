@@ -80,7 +80,6 @@ export async function POST(req: NextRequest) {
 
       // 1. Upload image
       const uploadId = nodeId++
-      nodes.append?.({} as any)
       nodes.push({
         id: uploadId,
         type: 'UploadImage',
