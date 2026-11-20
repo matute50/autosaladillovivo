@@ -8,7 +8,7 @@ Los slides generados son alojados en el bucket público 'slides' de Supabase Sto
 
 Características:
 - Diseño responsive TV-Grade con logo de Saladillo Vivo, subtitulado en una sola línea al ritmo del audio (karaoke broadcast) y controles ARIA.
-- Locución en acento rioplatense auténtico usando Voxtral TTS (Elena, voz_483) con preprocesador fonético.
+- Locución en acento rioplatense auténtico usando Gemini 2.5 Flash TTS con preprocesador fonético SOUL.md.
 - Optimización y redimensionado de imágenes Full HD con Pillow (Lanczos).
 - Plantilla Jinja2 interactiva con reproducción de audio automática y fallback manual.
 - Subida a Supabase Storage con headers públicos y mime-type 'text/html; charset=utf-8'.
@@ -528,14 +528,14 @@ class SlideGeneratorAgent:
     """
     Agente de generación de slides interactivos con voz rioplatense para Saladillo Vivo.
     """
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides", voice: str = "voxtral-elena"):
+    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None, storage_path: str = "data/slides", voice: str = "gemini-2.5-flash-tts"):
         env_url, env_key = load_env_credentials()
         self.supabase_url = (supabase_url or env_url or "https://otwvfihzaznyjvjtkvvd.supabase.co").rstrip('/')
         self.supabase_key = supabase_key or env_key or ""
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.bucket_name = "slides"
-        self.voice = voice  # Voxtral TTS Elena (voz femenina español rioplatense argentina)
+        self.voice = voice  # Gemini 2.5 Flash TTS (voz rioplatense bonaerense con SOUL.md)
         self.logger = logger
 
         # Cliente Supabase SDK oficial
@@ -595,9 +595,7 @@ class SlideGeneratorAgent:
     def text_to_speech_rioplatense(self, text: str, language: str = 'es-ES') -> Optional[bytes]:
         """
         Convierte texto a audio con acento rioplatense auténtico.
-        Motor EXCLUSIVO: Voxtral TTS (voz femenina Elena voice_483) + preprocesamiento
-        fonético (SOUL.md + skill tts-rioplatense-phonetics).
-        Prohibido: Edge TTS / gTTS / Gemini TTS (directiva del usuario).
+        Motor: Gemini 2.5 Flash TTS + preprocesamiento fonético (SOUL.md).
         """
         if not text:
             return None
@@ -616,7 +614,7 @@ class SlideGeneratorAgent:
                 if os.path.exists(temp_output) and os.path.getsize(temp_output) > 1000:
                     with open(temp_output, 'rb') as f:
                         audio_bytes = f.read()
-                    self.logger.info(f"Voz rioplatense Voxtral (Elena, femenina) sintetizada: {len(audio_bytes)} bytes")
+                    self.logger.info(f"Voz rioplatense sintetizada: {len(audio_bytes)} bytes")
                     return audio_bytes
             finally:
                 if os.path.exists(temp_output):

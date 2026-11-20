@@ -184,7 +184,7 @@ Si la noticia SÍ es local o regional, incluye "es_local_regional": true y cumpl
    - ESTILO: Como se habla en la radio bonaerense/rioplatense: cercano, natural, empático y con rigor periodístico. Cuidá la correcta acentuación (llegó, anunció, inauguró, continuará).
 
 4. ADAPTACIÓN FONÉTICA RIOPLATENSE (APLICACIÓN DE SOUL.md):
-   - El texto será locutado por motores TTS (Gemini, Rime Coda o Edge). Para que suene a locutor local del interior bonaerense, aplicá las reglas de pronunciación y modismos de SOUL.md sobre texto ortográficamente correcto (el motor ya aplica el sheísmo y la aspiración de la s).
+   - El texto será locutado por Gemini 2.5 Flash TTS (motor oficial). Para que suene a locutor local del interior bonaerense, aplicá las reglas de pronunciación y modismos de SOUL.md sobre texto ortográficamente correcto (el motor aplica el sheísmo y la aspiración suave de la s con acento rioplatense bonaerense).
    - PUNTUACIÓN ESTRATÉGICA (RESPIRACIÓN): los motores TTS modernos se guían por la puntuación para la emotividad:
      * Comas , para pausas breves y naturales.
      * Puntos seguidos . para bajar el tono y separar ideas.

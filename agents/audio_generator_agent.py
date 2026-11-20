@@ -106,8 +106,8 @@ class AudioGeneratorAgent:
         self.tts_voice_id = self.env.get('TTS_VOICE_ID')
         self.tts_api_url = self.env.get('TTS_API_URL', 'https://api.elevenlabs.io/v1/text-to-speech')
 
-        # Directiva editorial definitiva: alternar por noticia entre las dos voces
-        # argentinas de Edge/Azure TTS (es-AR-TomasNeural / es-AR-ElenaNeural).
+        # Motor oficial: Gemini 2.5 Flash TTS (gemini-2.5-flash-preview-tts)
+        # Respaldo secundario: ciclo alternado de voces Edge TTS ante caídas de red
         self._voice_cycle = itertools.cycle(["es-AR-TomasNeural", "es-AR-ElenaNeural"])
 
         # Resolver API key de Gemini
@@ -370,10 +370,9 @@ class AudioGeneratorAgent:
         """
         Convierte texto a audio con máxima fidelidad rioplatense.
         Orden de prioridad:
-        1. Gemini TTP (multi-key rotativo, SSML + SOUL.md) — motor principal.
+        1. Gemini 2.5 Flash TTS (multi-key rotativo, SSML + SOUL.md) — motor oficial principal.
         2. Rime Coda TTS (voces argentinas: cielo / abril / solsticio, $50/mes free tier).
-        3. Edge TTP (voces neurales argentinas de Microsoft Azure, alternando
-           es-AR-TomasNeural / es-AR-ElenaNeural por noticia) — respaldo.
+        3. Edge TTS (voces neurales argentinas) — respaldo secundario.
         4. Google TTS (gTTS) con tld='com.ar' — respaldo genérico.
 
         prefer_engine: si se pasa ('gemini'|'rime'|'edge'|'gtts'), ese motor se intenta

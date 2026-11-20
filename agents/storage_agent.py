@@ -244,14 +244,6 @@ class StorageAgent:
             hook_title = ai_data.get('titulo_gancho_imagen') or ai_data.get('titulo_gancho')
             if hook_title:
                 patch_payload['titulo_gancho_imagen'] = hook_title
-
-            # Campos para la Fábrica de Videos de Ara (Google Flow)
-            if ai_data.get('video_script'):
-                patch_payload['video_script'] = ai_data.get('video_script')
-            if ai_data.get('video_status'):
-                patch_payload['video_status'] = ai_data.get('video_status')
-            if ai_data.get('video_location_category'):
-                patch_payload['video_location_category'] = ai_data.get('video_location_category')
         else:
             original_title = ''
             radial_title = ''

@@ -38,10 +38,6 @@ from .article_ledger import (
 )
 from .storage_agent import StorageAgent
 from .ai_rewriter_agent import AiRewriterAgent
-try:
-    from .ara_script_writer import AraScriptWriter
-except ImportError:
-    AraScriptWriter = None
 from .audio_generator_agent import AudioGeneratorAgent
 from .slide_generator_agent import SlideGeneratorAgent
 from .publisher_agent import PublisherAgent
@@ -86,7 +82,6 @@ class OrchestratorAgent:
         self.scraper_agent = ScraperAgent()
         self.storage_agent = StorageAgent()
         self.rewriter_agent = AiRewriterAgent()
-        self.ara_writer = AraScriptWriter() if AraScriptWriter else None
         self.audio_agent = AudioGeneratorAgent()
         self.slide_agent = SlideGeneratorAgent()
         self.publisher_agent = PublisherAgent(self.storage_agent)
@@ -262,22 +257,6 @@ class OrchestratorAgent:
                 logger.info(f"  [Orchestrator] Omitiendo noticia nacional/internacional rechazada: '{art.get('title', '')[:50]}'")
                 continue
             art.update(ai_data)
-
-            # Generación de Guion para Ara (Fábrica de Videos - Métrica 8s)
-            if self.ara_writer:
-                try:
-                    script_data = self.ara_writer.write_script(art)
-                    if script_data:
-                        if script_data.get('excluido'):
-                            art['video_status'] = 'excluido'
-                        else:
-                            art['video_script'] = script_data['video_script']
-                            art['video_status'] = 'pendiente'
-                            art['video_location_category'] = script_data['categoria_locacion']
-                            logger.info(f"  [AraScriptWriter] Guion 8s generado: {script_data['total_bloques']} bloques ({script_data['categoria_locacion']})")
-                except Exception as e:
-                    logger.warning(f"  [AraScriptWriter] Error generando guion de video para art {art.get('id')}: {e}")
-
             modified_list.append(art)
             time.sleep(1.0)
 
